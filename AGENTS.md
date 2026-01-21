@@ -17,6 +17,50 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
 
+## Task Management with Beads (bd)
+
+This project uses **Beads** (`bd`) for task tracking. Always use `bd` commands to manage work.
+
+### Query Available Work
+```bash
+bd ready --json          # Tasks with no blockers (ready to work)
+bd list --json           # All tasks
+bd show <id> --json      # Task details
+```
+
+### Start Working on a Task
+```bash
+bd update <id> --status in_progress
+```
+
+### Complete a Task
+```bash
+bd close <id> --reason "Completed: <what was done>"
+```
+
+### Create New Tasks (discovered during work)
+```bash
+bd create "Task title" -p 1 --description "Details"
+bd create "Bug found" -p 0 --deps discovered-from:<parent-id>
+```
+
+### Add Dependencies
+```bash
+bd dep add <child> <parent>   # Child is blocked by Parent
+```
+
+### Sync to Git (ALWAYS run before ending session)
+```bash
+bd sync
+```
+
+### Current Project Tasks
+Run `bd ready` to see tasks available for work. Priority levels:
+- **P0**: Critical/Urgent
+- **P1**: High priority
+- **P2**: Medium priority
+- **P3**: Low priority
+
 ## Landing the Plane (Session Completion)
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
