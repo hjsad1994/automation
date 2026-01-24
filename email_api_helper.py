@@ -6,7 +6,7 @@ API: https://docs.dongvanfb.net/utils/get-messages-mail-with-oauth2
 import requests
 import time
 import re
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Callable
 
 # API Configuration
 API_ENDPOINT = "https://tools.dongvanfb.net/api/get_messages_oauth2"
@@ -163,7 +163,9 @@ def extract_openhands_verification_link(messages: list) -> Optional[str]:
 
 
 def wait_for_bitbucket_code(email: str, refresh_token: str, client_id: str,
-                            max_wait: int = 120, check_interval: int = 5) -> Optional[str]:
+                            max_wait: int = 120, check_interval: int = 5,
+                            resend_callback: Optional[Callable[[], bool]] = None,
+                            resend_after_attempts: int = 5) -> Optional[str]:
     """
     Đợi và lấy Bitbucket verification code
 
@@ -173,14 +175,20 @@ def wait_for_bitbucket_code(email: str, refresh_token: str, client_id: str,
         client_id: Client ID
         max_wait: Thời gian đợi tối đa (giây)
         check_interval: Khoảng thời gian giữa các lần check (giây)
+        resend_callback: Callback function để click "Resend email" - returns True nếu thành công
+        resend_after_attempts: Số lần check thất bại trước khi gọi resend_callback
 
     Returns:
         Verification code hoặc None nếu timeout
     """
     print(f"\n⏳ Đang đợi Bitbucket verification code (tối đa {max_wait}s)...")
     start_time = time.time()
+    attempts = 0
+    resend_triggered = False
 
     while time.time() - start_time < max_wait:
+        attempts += 1
+        
         # Gọi API
         data = get_emails_from_api(email, refresh_token, client_id)
 
@@ -189,6 +197,23 @@ def wait_for_bitbucket_code(email: str, refresh_token: str, client_id: str,
             code = extract_bitbucket_code(data["messages"])
             if code:
                 return code
+
+        # Check nếu cần gọi resend_callback
+        if (resend_callback and 
+            not resend_triggered and 
+            attempts >= resend_after_attempts):
+            print(f"\n🔄 Đã thử {attempts} lần không thành công, đang gọi Resend email...")
+            try:
+                if resend_callback():
+                    print("✓ Đã click Resend email thành công!")
+                    resend_triggered = True
+                    # Reset timer để có thêm thời gian chờ sau khi resend
+                    start_time = time.time()
+                    attempts = 0
+                else:
+                    print("⚠ Resend email callback trả về False")
+            except Exception as e:
+                print(f"✗ Lỗi khi gọi resend callback: {str(e)}")
 
         # Đợi trước khi check lại
         elapsed = int(time.time() - start_time)

@@ -192,7 +192,7 @@ def start_local_proxy_server(upstream_host, upstream_port, username, password, l
     PROXY_THREAD.start()
     PROXY_SERVER_RUNNING = True
     CURRENT_PROXY_PORT = local_port
-    time.sleep(2)  # Đợi proxy server khởi động
+    time.sleep(1)  # Đợi proxy server khởi động (giảm từ 2s)
     print(f"✓ Proxy server đã khởi động trên port {local_port}")
 
     return local_port
@@ -238,26 +238,20 @@ except ImportError:
     PYPERCLIP_AVAILABLE = False
     print("⚠ pyperclip not installed. API key will be extracted from page elements.")
 
-# URL target
-TARGET_URL = "https://app.all-hands.dev/"
+# URL target - Direct auth URL (bypasses Bitbucket OAuth button)
+TARGET_URL = "https://auth.app.all-hands.dev/realms/allhands/protocol/openid-connect/auth?client_id=allhands&kc_idp_hint=bitbucket&response_type=code&redirect_uri=https%3A%2F%2Fapp.all-hands.dev%2Foauth%2Fkeycloak%2Fcallback&scope=openid+email+profile&state=https%3A%2F%2Fapp.all-hands.dev%3Flogin_method%3Dbitbucket&login_method=bitbucket"
 EMAIL_FILE = "products.txt"  # Changed from email.txt to products.txt
-PROXY_FILE = "proxy.txt"  # File chứa danh sách proxy (format: IP:PORT:USERNAME:PASSWORD)
 
 # ============================================================
-# PROXY SETTINGS - BẬT/TẮT PROXY
+# PROXY SETTINGS - Chỉ dùng API xoay proxy
 # ============================================================
 USE_PROXY = True  # Bật/tắt sử dụng proxy
 
 # PROXY API ROTATION - Xoay proxy tự động qua API
-USE_PROXY_API = True  # True=Dùng API, False=Dùng file proxy.txt
 PROXY_API_URL = "https://proxyxoay.shop/api/get.php"
-PROXY_API_KEY = "iTYqKyrkYrDezGfnYrOGLC"
+PROXY_API_KEY = "tcLQfdoXPYtbjMZulCnJSs"
 PROXY_API_NETWORK = "random"  # random, viettel, fpt, vnpt, vinaphone, etc.
 PROXY_API_LOCATION = "0"      # 0=bất kỳ, hoặc mã tỉnh thành cụ thể
-
-# FILE-BASED PROXY (fallback khi API lỗi)
-# Format: IP:PORT:USERNAME:PASSWORD
-# Ví dụ: 118.70.171.67:23443:KbdsYf:ffyDYM
 
 # ============================================================
 # WARM-UP SETTINGS - Giảm CAPTCHA bằng cách warm-up account
@@ -309,12 +303,12 @@ TURBO_MODE = True  # True = Nhanh | False = An toàn
 # Cấu hình delays dựa trên mode
 if TURBO_MODE:
     print("🚀 TURBO MODE: BẬT - Tốc độ tối ưu")
-    DELAY_SHORT = (0.1, 0.2)          # Random delay ngắn
-    DELAY_MEDIUM = (0.2, 0.4)         # Random delay trung bình
-    DELAY_LONG = (0.5, 0.8)           # Random delay dài
-    TYPING_SPEED = (0.01, 0.02)       # Gõ nhanh
-    DELAY_BETWEEN_EMAILS = (2, 4)     # Delay giữa emails: 2-4s
-    PAGE_LOAD_WAIT = 0.5              # Đợi load trang
+    DELAY_SHORT = (0.05, 0.1)         # Random delay ngắn (giảm 50%)
+    DELAY_MEDIUM = (0.1, 0.2)         # Random delay trung bình (giảm 50%)
+    DELAY_LONG = (0.3, 0.5)           # Random delay dài (giảm 40%)
+    TYPING_SPEED = (0.005, 0.01)      # Gõ nhanh (giảm 50%)
+    DELAY_BETWEEN_EMAILS = (1, 2)     # Delay giữa emails: 1-2s (giảm 50%)
+    PAGE_LOAD_WAIT = 0.3              # Đợi load trang (giảm 40%)
     CAPTCHA_TIMEOUT = 30              # Timeout CAPTCHA: 30s
 else:
     print("🐢 TURBO MODE: TẮT - An toàn hơn (ít CAPTCHA)")
@@ -594,119 +588,27 @@ def warmup_browser(driver):
     print("✓ Hoàn thành warm-up browser!")
     print("="*60 + "\n")
 
-# Global proxy rotation state
-PROXY_LIST = []
-PROXY_INDEX = 0
-
 # Global proxy thread state - mỗi email 1 proxy mới
 PROXY_THREAD = None
 PROXY_SERVER_RUNNING = False
 PROXY_STOP_FLAG = False  # Flag để stop proxy thread
 CURRENT_PROXY_PORT = None
 
-def load_proxies_from_file(file_path="proxy.txt"):
-    """Đọc danh sách proxy từ file proxy.txt"""
-    global PROXY_LIST
-    try:
-        if not os.path.exists(file_path):
-            print(f"✗ Không tìm thấy file {file_path}")
-            return False
-
-        with open(file_path, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-
-        PROXY_LIST = []
-        for line in lines:
-            line = line.strip()
-            if line and not line.startswith('#'):  # Bỏ qua dòng trống và comment
-                PROXY_LIST.append(line)
-
-        if not PROXY_LIST:
-            print(f"✗ File {file_path} không có proxy nào")
-            return False
-
-        print(f"✓ Đã load {len(PROXY_LIST)} proxy từ {file_path}")
-        return True
-
-    except Exception as e:
-        print(f"✗ Lỗi khi đọc file proxy: {str(e)}")
-        return False
-
-def get_proxy_from_file():
-    """Lấy proxy tiếp theo từ danh sách (xoay vòng)"""
-    global PROXY_INDEX
-
-    try:
-        if not PROXY_LIST:
-            print("\n[Proxy] Danh sách proxy trống, đang load từ file...")
-            if not load_proxies_from_file():
-                return None
-
-        # Lấy proxy theo index hiện tại
-        proxy_line = PROXY_LIST[PROXY_INDEX]
-
-        # Parse format: IP:PORT:USERNAME:PASSWORD
-        parts = proxy_line.split(':')
-        if len(parts) != 4:
-            print(f"✗ Format proxy không đúng: {proxy_line}")
-            print("   Format đúng: IP:PORT:USERNAME:PASSWORD")
-            # Tăng index và thử proxy tiếp theo
-            PROXY_INDEX = (PROXY_INDEX + 1) % len(PROXY_LIST)
-            return get_proxy_from_file()
-
-        proxy_ip = parts[0]
-        proxy_port = parts[1]
-        proxy_user = parts[2]
-        proxy_pass = parts[3]
-
-        # Tạo format giống API cũ (để tương thích với code hiện tại)
-        proxy_http = f"{proxy_ip}:{proxy_port}:{proxy_user}:{proxy_pass}"
-
-        print(f"\n[Proxy] Đang sử dụng proxy {PROXY_INDEX + 1}/{len(PROXY_LIST)}")
-        print(f"  Proxy Server: {proxy_ip}:{proxy_port}")
-        print(f"  Username: {proxy_user}")
-
-        # Lấy IP thực tế mà proxy sẽ cung cấp bằng curl
-        print(f"[Proxy] Đang kiểm tra IP thực tế của proxy...")
-        real_proxy_ip = None
-        try:
-            import subprocess
-            result = subprocess.run(
-                ['curl', '-x', f'http://{proxy_user}:{proxy_pass}@{proxy_ip}:{proxy_port}',
-                 '--connect-timeout', '10', 'https://api.ipify.org'],
-                capture_output=True,
-                text=True,
-                timeout=15
-            )
-            if result.returncode == 0:
-                real_proxy_ip = result.stdout.strip()
-                print(f"  ✓ IP thực tế qua proxy: {real_proxy_ip}")
-            else:
-                print(f"  ⚠ Không thể verify IP proxy (curl failed)")
-        except Exception as e:
-            print(f"  ⚠ Không thể verify IP proxy: {str(e)}")
-
-        # Tăng index cho lần sau (xoay vòng)
-        PROXY_INDEX = (PROXY_INDEX + 1) % len(PROXY_LIST)
-
-        return {
-            "http": proxy_http,
-            "socks5": None,  # Không dùng socks5
-            "location": f"Proxy {PROXY_INDEX}/{len(PROXY_LIST)}",
-            "isp": "File-based proxy",
-            "real_ip": real_proxy_ip  # IP thực tế để verify
-        }
-
-    except Exception as e:
-        print(f"✗ Lỗi không xác định khi lấy proxy: {str(e)}")
-        return None
+# REMOVED: File-based proxy logic
+# def load_proxies_from_file(file_path="proxy.txt"):
+#     """Đọc danh sách proxy từ file proxy.txt"""
+#     ...
+#
+# def get_proxy_from_file():
+#     """Lấy proxy tiếp theo từ danh sách (xoay vòng)"""
+#     ...
 
 def get_proxy_from_api():
     """
     Lấy proxy mới từ API proxyxoay.shop
 
     Không cần xoay vòng - mỗi lần gọi API sẽ trả về proxy mới
-    Sử dụng HTTP proxy với username/password như logic cũ
+    Sử dụng HTTP proxy với username/password
 
     API Response:
     {
@@ -720,13 +622,8 @@ def get_proxy_from_api():
     }
 
     Returns:
-        dict: Proxy info hoặc None nếu lỗi (sẽ fallback sang file)
+        dict: Proxy info hoặc None nếu lỗi
     """
-    # Nếu tắt API, dùng file-based
-    if not USE_PROXY_API:
-        print("\n[Proxy] USE_PROXY_API=False, đang dùng file-based proxy...")
-        return get_proxy_from_file()
-
     try:
         print("\n[Proxy API] Đang gọi API proxyxoay.shop để lấy proxy mới...")
 
@@ -743,8 +640,8 @@ def get_proxy_from_api():
         # Check HTTP status
         if response.status_code != 200:
             print(f"✗ API HTTP error: {response.status_code}")
-            print("  → Fallback sang file-based proxy...")
-            return get_proxy_from_file()
+            print("  → Không thể lấy proxy từ API")
+            return None
 
         # Parse JSON response
         data = response.json()
@@ -761,23 +658,20 @@ def get_proxy_from_api():
             elif api_status == 102:
                 print("  → Không có proxy khả dụng")
 
-            print("  → Fallback sang file-based proxy...")
-            return get_proxy_from_file()
+            return None
 
         # Extract proxy HTTP (format: IP:PORT:USERNAME:PASSWORD)
         proxy_http = data.get('proxyhttp')
         if not proxy_http:
             print("✗ API không trả về 'proxyhttp' field")
-            print("  → Fallback sang file-based proxy...")
-            return get_proxy_from_file()
+            return None
 
         # Parse proxy format: IP:PORT:USERNAME:PASSWORD
         parts = proxy_http.split(':')
         if len(parts) != 4:
             print(f"✗ Format proxy không đúng: {proxy_http}")
             print("  Expected: IP:PORT:USERNAME:PASSWORD")
-            print("  → Fallback sang file-based proxy...")
-            return get_proxy_from_file()
+            return None
 
         proxy_ip = parts[0]
         proxy_port = parts[1]
@@ -793,7 +687,7 @@ def get_proxy_from_api():
         print(f"  Expires: {data.get('Token expiration date', 'unknown')}")
         print(f"  Message: {data.get('message', '')}")
 
-        # Verify IP thực tế bằng curl (giống logic cũ)
+        # Verify IP thực tế bằng curl
         print(f"[Proxy] Đang kiểm tra IP thực tế của proxy...")
         real_proxy_ip = None
         try:
@@ -813,7 +707,7 @@ def get_proxy_from_api():
         except Exception as e:
             print(f"  ⚠ Không thể verify IP proxy: {str(e)}")
 
-        # Return proxy dict với format GIỐNG HỆT logic cũ
+        # Return proxy dict
         return {
             "http": proxy_http,  # IP:PORT:USERNAME:PASSWORD
             "socks5": data.get('proxysocks5'),  # Có thể dùng SOCKS5 sau này
@@ -824,25 +718,21 @@ def get_proxy_from_api():
 
     except requests.Timeout:
         print("✗ API timeout sau 15s")
-        print("  → Fallback sang file-based proxy...")
-        return get_proxy_from_file()
+        return None
 
     except requests.RequestException as e:
         print(f"✗ Lỗi kết nối API: {str(e)}")
-        print("  → Fallback sang file-based proxy...")
-        return get_proxy_from_file()
+        return None
 
     except json.JSONDecodeError as e:
         print(f"✗ Lỗi parse JSON từ API: {str(e)}")
-        print("  → Fallback sang file-based proxy...")
-        return get_proxy_from_file()
+        return None
 
     except Exception as e:
         print(f"✗ Lỗi không xác định: {str(e)}")
         import traceback
         traceback.print_exc()
-        print("  → Fallback sang file-based proxy...")
-        return get_proxy_from_file()
+        return None
 
 def create_proxy_extension(proxy_host, proxy_port, proxy_user, proxy_pass):
     """Tạo Chrome extension để xử lý proxy authentication"""
@@ -1109,8 +999,9 @@ def setup_chrome_driver(proxy_info=None):
     original_ip = None
 
     # Lấy IP gốc TRƯỚC KHI setup proxy (để so sánh sau)
-    if proxy_info:
-        original_ip = get_original_ip()
+    # DISABLED: Proxy đã hoạt động đúng, không cần verify nữa
+    # if proxy_info:
+    #     original_ip = get_original_ip()
 
     if proxy_info:
         proxy_http = proxy_info.get("http")
@@ -1137,41 +1028,27 @@ def setup_chrome_driver(proxy_info=None):
                 )
 
     # Setup Chrome với proxy
-    if UC_AVAILABLE:
-        print("Đang sử dụng undetected-chromedriver với local proxy")
+    # DISABLED: undetected-chromedriver bị lỗi SSL certificate với proxy
+    # if UC_AVAILABLE:
+    #     print("Đang sử dụng undetected-chromedriver với local proxy")
+    #
+    #     options = uc.ChromeOptions()
+    #
+    #     if local_proxy_port:
+    #         # Dùng local proxy (không cần auth vì local)
+    #         options.add_argument(f'--proxy-server=http://127.0.0.1:{local_proxy_port}')
+    #         print(f"✓ Chrome sẽ dùng local proxy: 127.0.0.1:{local_proxy_port}")
+    #
+    #     try:
+    #         driver = uc.Chrome(options=options, version_main=None)
+    #         print("✓ Đã khởi tạo undetected Chrome driver")
+    #
+    #         return driver
+    #     except Exception as e:
+    #         print(f"⚠ Lỗi khi khởi tạo undetected driver: {str(e)}")
+    #         print("  Fallback sang Selenium thông thường...")
 
-        options = uc.ChromeOptions()
-
-        if local_proxy_port:
-            # Dùng local proxy (không cần auth vì local)
-            options.add_argument(f'--proxy-server=http://127.0.0.1:{local_proxy_port}')
-            print(f"✓ Chrome sẽ dùng local proxy: 127.0.0.1:{local_proxy_port}")
-
-        try:
-            driver = uc.Chrome(options=options, version_main=None)
-            print("✓ Đã khởi tạo undetected Chrome driver")
-
-            # Verify proxy hoạt động ĐÚNG (IP phải khác IP gốc)
-            if local_proxy_port:
-                print("[Proxy] Đang đợi proxy khởi tạo (5 giây)...")
-                time.sleep(5)
-
-                verify_result = verify_proxy_is_working(driver, proxy_ip_to_verify, original_ip)
-                if verify_result == False:
-                    print("\n" + "!"*60)
-                    print("❌ CẢNH BÁO: PROXY KHÔNG HOẠT ĐỘNG!")
-                    print("   Browser đang dùng IP gốc (không qua proxy)")
-                    print("   Script sẽ tiếp tục nhưng có thể bị phát hiện")
-                    print("!"*60 + "\n")
-                elif verify_result == True:
-                    print("[Proxy] ✅ PROXY HOẠT ĐỘNG HOÀN HẢO - IP đã thay đổi!")
-
-            return driver
-        except Exception as e:
-            print(f"⚠ Lỗi khi khởi tạo undetected driver: {str(e)}")
-            print("  Fallback sang Selenium thông thường...")
-
-    # Fallback: Selenium thông thường
+    # Sử dụng Selenium thông thường (không dùng undetected-chromedriver)
     print("Đang sử dụng Selenium Chrome driver")
     chrome_options = Options()
     chrome_options.add_argument("--no-sandbox")
@@ -1188,16 +1065,17 @@ def setup_chrome_driver(proxy_info=None):
         driver = webdriver.Chrome(options=chrome_options)
 
     # Verify proxy
-    if local_proxy_port:
-        print("[Proxy] Đang đợi proxy khởi tạo (5 giây)...")
-        time.sleep(5)
-        verify_result = verify_proxy_is_working(driver, proxy_ip_to_verify, original_ip)
-        if verify_result == True:
-            print("[Proxy] ✅ PROXY HOẠT ĐỘNG HOÀN HẢO - IP đã thay đổi!")
-        elif verify_result == False:
-            print("\n" + "!"*60)
-            print("❌ CẢNH BÁO: PROXY KHÔNG HOẠT ĐỘNG!")
-            print("!"*60 + "\n")
+    # DISABLED: Proxy đã hoạt động đúng, không cần verify nữa để chạy nhanh hơn
+    # if local_proxy_port:
+    #     print("[Proxy] Đang đợi proxy khởi tạo (5 giây)...")
+    #     time.sleep(5)
+    #     verify_result = verify_proxy_is_working(driver, proxy_ip_to_verify, original_ip)
+    #     if verify_result == True:
+    #         print("[Proxy] ✅ PROXY HOẠT ĐỘNG HOÀN HẢO - IP đã thay đổi!")
+    #     elif verify_result == False:
+    #         print("\n" + "!"*60)
+    #         print("❌ CẢNH BÁO: PROXY KHÔNG HOẠT ĐỘNG!")
+    #         print("!"*60 + "\n")
 
     return driver
 
@@ -1658,8 +1536,8 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
         random_delay(delay_type='short')
         human_like_type(email_field, email)
 
-        # Delay 2-3s sau khi nhập email (giống người thật)
-        delay_after_typing = random.uniform(2, 3)
+        # Delay 1-1.5s sau khi nhập email (giảm từ 2-3s)
+        delay_after_typing = random.uniform(1, 1.5)
         print(f"⏱️  Đợi {delay_after_typing:.1f}s sau khi nhập email (human-like behavior)...")
         time.sleep(delay_after_typing)
 
@@ -1693,8 +1571,8 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
             email_field.send_keys(Keys.RETURN)
             print("✓ Đã nhấn Enter trên email field")
 
-        # Đợi trang load sau Continue
-        time.sleep(2)
+        # Đợi trang load sau Continue (giảm từ 2s xuống 1s)
+        time.sleep(1)
 
         # Bước 3: Click nút "Sign up" (nếu có) - Timeout 3s
         print("\n[Bitbucket Login 3/5] Đang tìm nút 'Sign up' (timeout 3s)...")
@@ -1726,8 +1604,8 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
                 driver.execute_script("arguments[0].click();", signup_button)
                 print("✓ Đã click nút 'Sign up' (JavaScript)")
 
-            # Đợi trang load sau Sign up
-            time.sleep(2)
+            # Đợi trang load sau Sign up (giảm từ 2s xuống 1s)
+            time.sleep(1)
 
         # CAPTCHA Check sau Sign up - Dùng function đã cải tiến
         print("\n[CAPTCHA Check] Đang kiểm tra CAPTCHA sau Sign up...")
@@ -1736,13 +1614,45 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
         # Bước 4: Lấy SMS code từ API messages (thay vì API get_code)
         print("\n[Bitbucket Login 4/5] Đang lấy mã SMS từ API messages...")
 
-        # Dùng wait_for_bitbucket_code từ email_api_helper
+        def click_resend_email():
+            try:
+                resend_selectors = [
+                    (By.XPATH, "//span[contains(text(), 'Resend email')]"),
+                    (By.XPATH, "//button[contains(text(), 'Resend email')]"),
+                    (By.XPATH, "//*[contains(text(), \"Didn't receive an email\")]"),
+                    (By.CSS_SELECTOR, "span.css-1gd7hga"),
+                    (By.XPATH, "//span[contains(@class, 'css-') and contains(text(), 'Resend')]"),
+                ]
+                
+                for by, selector in resend_selectors:
+                    try:
+                        resend_elem = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((by, selector))
+                        )
+                        try:
+                            resend_elem.click()
+                        except:
+                            driver.execute_script("arguments[0].click();", resend_elem)
+                        print("✓ Đã click 'Resend email'")
+                        time.sleep(2)
+                        return True
+                    except:
+                        continue
+                
+                print("⚠ Không tìm thấy nút 'Resend email'")
+                return False
+            except Exception as e:
+                print(f"✗ Lỗi khi click Resend email: {str(e)}")
+                return False
+
         sms_code = wait_for_bitbucket_code(
             email=email,
             refresh_token=refresh_token,
             client_id=client_id,
-            max_wait=120,  # Đợi tối đa 120s
-            check_interval=5  # Check mỗi 5s
+            max_wait=120,
+            check_interval=5,
+            resend_callback=click_resend_email,
+            resend_after_attempts=5
         )
 
         # Nếu có SMS code, điền vào 6 ô OTP riêng biệt
@@ -1784,8 +1694,8 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
 
                 print("✓ Đã điền tất cả 6 ký tự OTP")
 
-                # Đợi trang load
-                time.sleep(2)
+                # Đợi trang load (giảm từ 2s xuống 1s)
+                time.sleep(1)
 
                 # Sau OTP: Điền username và password
                 print("\n[Bitbucket Login 6/7] Đang điền username và password...")
@@ -1882,7 +1792,7 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
                     if password_field:
                         password_field.send_keys(Keys.RETURN)
 
-                time.sleep(2)
+                time.sleep(1)  # Giảm từ 2s xuống 1s
             else:
                 print(f"✗ Chỉ tìm thấy {len(otp_inputs)}/6 OTP inputs")
         else:
@@ -1902,13 +1812,15 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
     """
     Xử lý các bước sau khi đăng nhập Bitbucket thành công
 
-    Luồng đơn giản hóa:
+    Luồng mới (2026-01):
     1. Click "Grant access" (nếu có)
     2. Click "Resend verification"
-    3. Verify email qua API (thay vì Selenium dongvanfb)
-    4. Click checkbox Terms of Service
-    5. Click "Continuer"
-    6. Lấy API key và lưu vào file
+    3. Verify email qua API (lấy verification link)
+    4. Mở tab mới và navigate đến URL auth để login
+    5. Redirect về app.all-hands.dev (tự động đã login)
+    6. Click checkbox Terms of Service
+    7. Click "Continuer"
+    8. Lấy API key và lưu vào file
     """
     try:
         print("\n=== BẮT ĐẦU CÁC BƯỚC SAU ĐĂNG NHẬP ===")
@@ -1973,77 +1885,103 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
         print("\nĐang đợi redirect về All-Hands.dev...")
         time.sleep(2)
 
-        # CHECK: Sau Grant access, có phải login lại không?
-        print("\n[Post-Login 1.5/6] Kiểm tra xem có cần chọn Bitbucket lại không...")
-        bitbucket_check_selectors = [
-            (By.XPATH, "//button[contains(text(), 'Bitbucket')]"),
-            (By.XPATH, "//button[@type='button' and contains(., 'Bitbucket')]"),
-            (By.XPATH, "//button[text()='Se connecter à Bitbucket']"),
-            (By.XPATH, "//button[contains(text(), 'Se connecter à Bitbucket')]"),
-        ]
-
-        bitbucket_button_again = None
-        short_wait = WebDriverWait(driver, 5)  # Timeout ngắn, chỉ 5s
-        for by, selector in bitbucket_check_selectors:
-            try:
-                bitbucket_button_again = short_wait.until(EC.element_to_be_clickable((by, selector)))
-                print("⚠ Phát hiện trang yêu cầu chọn Bitbucket lại!")
-                break
-            except TimeoutException:
-                continue
-
-        if bitbucket_button_again:
-            # Click Bitbucket lại
-            try:
-                bitbucket_button_again.click()
-                print("✓ Đã click Bitbucket lại")
-                time.sleep(2)
-            except:
-                driver.execute_script("arguments[0].click();", bitbucket_button_again)
-                print("✓ Đã click Bitbucket lại (JavaScript)")
-                time.sleep(2)
-        else:
-            print("✓ Không cần login lại, tiếp tục với Resend verification...")
-
-        # Bước 2: Click "Resend verification"
-        print("\n[Post-Login 2/6] Đang tìm nút 'Resend verification'...")
-        resend_selectors = [
-            (By.XPATH, "//button[@type='button' and contains(@class, 'bg-primary') and contains(text(), 'Resend verification')]"),
-            (By.XPATH, "//button[contains(@class, 'bg-primary') and contains(., 'Resend verification')]"),
-            (By.XPATH, "//button[contains(text(), 'Resend verification')]"),
-        ]
-
-        resend_button = None
-        for by, selector in resend_selectors:
-            try:
-                resend_button = wait.until(EC.element_to_be_clickable((by, selector)))
-                print("✓ Tìm thấy nút 'Resend verification'")
-                break
-            except TimeoutException:
-                continue
-
-        if resend_button:
-            try:
-                resend_button.click()
-                print("✓ Đã click nút 'Resend verification'")
-            except:
-                driver.execute_script("arguments[0].click();", resend_button)
-                print("✓ Đã click nút 'Resend verification' (JavaScript)")
-            time.sleep(3)
-        else:
-            print("⚠ Không tìm thấy nút 'Resend verification', bỏ qua...")
-
-        # Bước 3: Verify email qua API
-        print("\n[Post-Login 3/6] Đang lấy verification link qua API...")
-
-        # Đợi và lấy verification link từ email
-        verify_link = wait_for_openhands_link(
+        # Bước 1.5: Kiểm tra email verification TRƯỚC
+        print("\n[Post-Login 1.5/6] Kiểm tra email verification trước...")
+        print("🔍 Check email...")
+        verify_link_early = wait_for_openhands_link(
             email=email,
             refresh_token=refresh_token,
             client_id=client_id,
-            max_wait=120,
-            check_interval=5
+            max_wait=10,  # Đợi ngắn - chỉ 10s
+            check_interval=3
         )
+
+        if verify_link_early:
+            print("✓ Đã có email verification sẵn! Bỏ qua check Bitbucket & Resend.")
+            verify_link = verify_link_early
+            skip_resend = True
+        else:
+            print("⚠ Chưa có email → Kiểm tra Bitbucket lại...")
+            verify_link = None
+            skip_resend = False
+
+            # Kiểm tra xem có cần chọn Bitbucket lại không
+            print("\n[Post-Login 1.6/6] Kiểm tra xem có cần chọn Bitbucket lại không...")
+            bitbucket_check_selectors = [
+                (By.XPATH, "//button[contains(text(), 'Bitbucket')]"),
+                (By.XPATH, "//button[@type='button' and contains(., 'Bitbucket')]"),
+                (By.XPATH, "//button[text()='Se connecter à Bitbucket']"),
+                (By.XPATH, "//button[contains(text(), 'Se connecter à Bitbucket')]"),
+            ]
+
+            bitbucket_button_again = None
+            short_wait = WebDriverWait(driver, 5)  # Timeout ngắn, chỉ 5s
+            for by, selector in bitbucket_check_selectors:
+                try:
+                    bitbucket_button_again = short_wait.until(EC.element_to_be_clickable((by, selector)))
+                    print("⚠ Phát hiện trang yêu cầu chọn Bitbucket lại!")
+                    break
+                except TimeoutException:
+                    continue
+
+            if bitbucket_button_again:
+                # Click Bitbucket lại
+                try:
+                    bitbucket_button_again.click()
+                    print("✓ Đã click Bitbucket lại")
+                    time.sleep(2)
+                except:
+                    driver.execute_script("arguments[0].click();", bitbucket_button_again)
+                    print("✓ Đã click Bitbucket lại (JavaScript)")
+                    time.sleep(2)
+            else:
+                print("✓ Không cần login lại, tiếp tục với Resend verification...")
+
+        # Bước 2: Click "Resend verification" nếu cần
+        if not skip_resend:
+            print("\n[Post-Login 2.5/6] Đang tìm nút 'Resend verification'...")
+            resend_selectors = [
+                (By.XPATH, "//button[@type='button' and contains(@class, 'bg-primary') and contains(text(), 'Resend verification')]"),
+                (By.XPATH, "//button[contains(@class, 'bg-primary') and contains(., 'Resend verification')]"),
+                (By.XPATH, "//button[contains(text(), 'Resend verification')]"),
+            ]
+
+            resend_button = None
+            for by, selector in resend_selectors:
+                try:
+                    resend_button = wait.until(EC.element_to_be_clickable((by, selector)))
+                    print("✓ Tìm thấy nút 'Resend verification'")
+                    break
+                except TimeoutException:
+                    continue
+
+            if resend_button:
+                try:
+                    resend_button.click()
+                    print("✓ Đã click nút 'Resend verification'")
+                except:
+                    driver.execute_script("arguments[0].click();", resend_button)
+                    print("✓ Đã click nút 'Resend verification' (JavaScript)")
+                time.sleep(2)  # Giảm từ 3s xuống 2s
+            else:
+                print("⚠ Không tìm thấy nút 'Resend verification', bỏ qua...")
+        else:
+            print("\n[Post-Login 2.5/6] ✓ Bỏ qua Resend - đã có email verification sẵn")
+
+        # Bước 3: Verify email qua API (nếu chưa có từ bước 2)
+        if not verify_link:
+            print("\n[Post-Login 3/6] Đang lấy verification link qua API...")
+
+            # Đợi và lấy verification link từ email
+            verify_link = wait_for_openhands_link(
+                email=email,
+                refresh_token=refresh_token,
+                client_id=client_id,
+                max_wait=120,
+                check_interval=5
+            )
+        else:
+            print("\n[Post-Login 3/6] ✓ Đã có verification link từ check sớm")
 
         if not verify_link:
             print("✗ Không nhận được email verification sau 120s")
@@ -2054,7 +1992,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
             # Mở verification link trong browser
             print("🔄 Đang mở verification link...")
             driver.get(verify_link)
-            time.sleep(2)
+            time.sleep(1.5)  # Giảm từ 2s xuống 1.5s
 
             # Click "Click here to proceed" (nếu có)
             print("🔄 Đang tìm link 'Click here to proceed'...")
@@ -2079,7 +2017,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
                 if proceed_link:
                     proceed_link.click()
                     print("✓ Đã click 'Click here to proceed'")
-                    time.sleep(2)
+                    time.sleep(1.5)  # Giảm từ 2s xuống 1.5s
                 else:
                     print("⚠ Không tìm thấy link 'Click here to proceed', bỏ qua...")
             except Exception as e:
@@ -2108,7 +2046,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
                 if back_link:
                     back_link.click()
                     print("✓ Đã click 'Back to Application'")
-                    time.sleep(3)
+                    time.sleep(2)  # Giảm từ 3s xuống 2s
                 else:
                     print("⚠ Không tìm thấy link 'Back to Application', thử navigate trực tiếp...")
                     driver.get("https://app.all-hands.dev/?email_verified=true")
@@ -2118,44 +2056,35 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
 
             print("✓ Hoàn thành verify email qua API")
 
-        # Bước 3.5: Click Bitbucket lần 2 để login vào app
-        print("\n[Post-Login 3.5/6] Đang click Bitbucket lần 2 để login...")
+        # Bước 3.5: Mở tab mới và navigate đến URL auth để login
+        print("\n[Post-Login 3.5/6] Đang mở tab mới với URL auth để login...")
 
-        # Đợi trang app.all-hands.dev load
+        # Mở tab mới
+        driver.execute_script("window.open('');")
+
+        # Switch sang tab mới
+        new_tab = driver.window_handles[-1]
+        driver.switch_to.window(new_tab)
+
+        # Navigate đến URL auth
+        auth_url = "https://auth.app.all-hands.dev/realms/allhands/protocol/openid-connect/auth?client_id=allhands&kc_idp_hint=bitbucket&response_type=code&redirect_uri=https%3A%2F%2Fapp.all-hands.dev%2Foauth%2Fkeycloak%2Fcallback&scope=openid+email+profile&state=https%3A%2F%2Fapp.all-hands.dev%3Flogin_method%3Dbitbucket&login_method=bitbucket"
+        print(f"Đang navigate đến: {auth_url[:80]}...")
+        driver.get(auth_url)
+        print("✓ Đã mở tab mới và navigate đến URL auth")
+
+        # Đợi redirect về app (tự động login)
+        print("Đang đợi redirect về app.all-hands.dev...")
+        time.sleep(2)  # Giảm từ 3s xuống 2s
+
         try:
             WebDriverWait(driver, 10).until(
                 lambda d: "app.all-hands.dev" in d.current_url
             )
-            print(f"✓ Đang ở trang: {driver.current_url}")
+            print(f"✓ Đã về trang app: {driver.current_url}")
         except:
-            pass
+            print(f"⚠ Chưa về app. URL hiện tại: {driver.current_url}")
 
-        time.sleep(2)
-
-        # Click nút Bitbucket
-        bitbucket_clicked = click_bitbucket_button(driver, wait_time=10)
-
-        if not bitbucket_clicked:
-            print("⚠ Không tìm thấy nút Bitbucket lần 2")
-            # Thử refresh và tìm lại
-            print("  Đang refresh trang và tìm lại...")
-            driver.refresh()
-            time.sleep(3)
-            bitbucket_clicked = click_bitbucket_button(driver, wait_time=10)
-
-            if not bitbucket_clicked:
-                print("✗ Vẫn không tìm thấy nút Bitbucket sau refresh")
-                print("⚠ Thử tiếp tục với các bước tiếp theo...")
-            else:
-                print("✓ Đã click Bitbucket lần 2 (sau refresh)")
-                time.sleep(3)
-        else:
-            print("✓ Đã click Bitbucket lần 2")
-            time.sleep(3)
-
-        # Đợi redirect hoặc popup xử lý login
-        print("Đang đợi sau khi click Bitbucket lần 2...")
-        time.sleep(2)
+        time.sleep(1.5)  # Giảm từ 2s xuống 1.5s
 
         # Bước 4: Đợi trang all-hands.dev sẵn sàng và click checkbox chấp nhận điều khoản
         print("\n[Post-Login 4/6] Đang kiểm tra trang All-Hands.dev...")
@@ -2214,7 +2143,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
             except:
                 driver.execute_script("arguments[0].click();", checkbox)
                 print("✓ Đã click checkbox (JavaScript)")
-            time.sleep(1)
+            time.sleep(0.5)  # Giảm từ 1s xuống 0.5s
         else:
             print("⚠ Không tìm thấy checkbox, có thể không cần thiết")
 
@@ -2268,7 +2197,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
 
             # ĐỢI VÀ VERIFY click đã hoàn thành trước khi tiếp tục
             print("Đang đợi sau khi click Continuer...")
-            wait_after_continuer = 2 if TURBO_MODE else 3
+            wait_after_continuer = 1 if TURBO_MODE else 2  # Giảm từ 2/3s xuống 1/2s
             time.sleep(wait_after_continuer)
 
             # Check xem có popup/window mới không
@@ -2283,7 +2212,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
             print("⚠ Không tìm thấy nút 'Continuer'")
 
         # Bước 6: Đợi redirect sang /settings/api-keys và copy API key
-        api_keys_timeout = 8 if TURBO_MODE else 15
+        api_keys_timeout = 3 if TURBO_MODE else 10
         print(f"\n[Post-Login 6/6] Đang đợi redirect sang trang API keys (timeout {api_keys_timeout}s)...")
         try:
             WebDriverWait(driver, api_keys_timeout).until(
@@ -2463,13 +2392,12 @@ def main():
         print("Bắt đầu automation đăng ký All-Hands.dev")
         print("=" * 50)
 
-        # Load danh sách proxy từ file (nếu USE_PROXY = True)
-        if USE_PROXY:
-            print("\n[Khởi tạo] Đang load danh sách proxy từ file...")
-            if not load_proxies_from_file(PROXY_FILE):
-                print("⚠ Không thể load proxy từ file. Tiếp tục không dùng proxy...")
-                # Không dừng script, chỉ warning
-            print()
+        # REMOVED: Load proxy từ file
+        # if USE_PROXY:
+        #     print("\n[Khởi tạo] Đang load danh sách proxy từ file...")
+        #     if not load_proxies_from_file(PROXY_FILE):
+        #         print("⚠ Không thể load proxy từ file. Tiếp tục không dùng proxy...")
+        #     print()
 
         # Đọc tất cả email từ file
         print("\n[0/5] Đang đọc danh sách email từ file...")
@@ -2519,26 +2447,16 @@ def main():
                 main_window = driver.current_window_handle
                 print(f"🔒 Main window handle: {main_window[:8]}...")
 
-                # Truy cập trang All-Hands.dev
-                print(f"\n[3/6] Đang truy cập: {TARGET_URL}")
+                # Truy cập URL auth trực tiếp (không cần click Bitbucket OAuth)
+                print(f"\n[3/6] Đang truy cập URL auth: {TARGET_URL}")
                 try:
                     driver.get(TARGET_URL)
-                    print("✓ Đã truy cập trang All-Hands.dev")
-
-                    # Clear cookies và session để đảm bảo logout
-                    print("🔄 Đang clear cookies và session...")
-                    driver.delete_all_cookies()
-                    time.sleep(1)
-
-                    # Refresh lại trang để áp dụng logout
-                    driver.refresh()
-                    time.sleep(2)
-                    print("✓ Đã logout (cleared cookies)")
+                    print("✓ Đã truy cập trang auth, sẽ tự động redirect sang Atlassian/Bitbucket")
                 except Exception as e:
                     print(f"⚠ Lỗi khi truy cập URL: {str(e)}")
                     driver, _ = check_and_restart_driver(driver, current_proxy)
                     driver.get(TARGET_URL)
-                    print("✓ Đã truy cập trang All-Hands.dev (sau khi khởi động lại)")
+                    print("✓ Đã truy cập URL auth (sau khi khởi động lại)")
 
                 # Đợi trang load + React hydration
                 print("\nĐang đợi trang load...")
@@ -2551,19 +2469,23 @@ def main():
                 except:
                     time.sleep(1)
 
-                # Click nút Bitbucket
-                print("\n[6/7] Đang tìm và click nút Bitbucket...")
-                if not click_bitbucket_button(driver):
-                    print("✗ Không thể click nút Bitbucket, bỏ qua email này")
-                    continue
+                # URL mới đã trỏ trực tiếp sang Bitbucket auth, không cần click nút
+                print("\n[3/6] Đang đợi trang Atlassian/Bitbucket login load...")
 
-                # Đợi redirect sang Atlassian
-                print("\n[7/7] Đang đợi redirect sang Atlassian...")
-                if not wait_for_atlassian_redirect(driver):
-                    print("✗ Không redirect sang Atlassian, bỏ qua email này")
-                    continue
+                # Đợi trang Atlassian/Bitbucket login sẵn sàng
+                try:
+                    WebDriverWait(driver, 10).until(
+                        lambda d: "atlassian.com" in d.current_url or "id.atlassian" in d.current_url
+                    )
+                    print(f"✓ Đã redirect tới Atlassian: {driver.current_url}")
+                except TimeoutException:
+                    print(f"⚠ Chưa redirect sang Atlassian. URL hiện tại: {driver.current_url}")
+                    # Vẫn tiếp tục vì có thể đã ở đúng trang
+
+                time.sleep(2)
 
                 # Đăng nhập Bitbucket với API credentials để lấy SMS
+                print("\n[4/6] Đang đăng nhập Bitbucket...")
                 login_success = login_bitbucket(driver, email, password, refresh_token, client_id)
 
                 if not login_success:

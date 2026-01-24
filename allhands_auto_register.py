@@ -249,7 +249,7 @@ USE_PROXY = True  # Bật/tắt sử dụng proxy
 
 # PROXY API ROTATION - Xoay proxy tự động qua API
 PROXY_API_URL = "https://proxyxoay.shop/api/get.php"
-PROXY_API_KEY = "tcLQfdoXPYtbjMZulCnJSs"
+PROXY_API_KEY = "xdMiUWwRyzcuQIQgzyvWtz"
 PROXY_API_NETWORK = "random"  # random, viettel, fpt, vnpt, vinaphone, etc.
 PROXY_API_LOCATION = "0"      # 0=bất kỳ, hoặc mã tỉnh thành cụ thể
 
@@ -302,14 +302,14 @@ TURBO_MODE = True  # True = Nhanh | False = An toàn
 
 # Cấu hình delays dựa trên mode
 if TURBO_MODE:
-    print("🚀 TURBO MODE: BẬT - Tốc độ tối ưu")
-    DELAY_SHORT = (0.05, 0.1)         # Random delay ngắn (giảm 50%)
-    DELAY_MEDIUM = (0.1, 0.2)         # Random delay trung bình (giảm 50%)
-    DELAY_LONG = (0.3, 0.5)           # Random delay dài (giảm 40%)
-    TYPING_SPEED = (0.005, 0.01)      # Gõ nhanh (giảm 50%)
-    DELAY_BETWEEN_EMAILS = (1, 2)     # Delay giữa emails: 1-2s (giảm 50%)
-    PAGE_LOAD_WAIT = 0.3              # Đợi load trang (giảm 40%)
-    CAPTCHA_TIMEOUT = 30              # Timeout CAPTCHA: 30s
+    print("🚀 TURBO MODE: BẬT - Tốc độ TỐI ĐA")
+    DELAY_SHORT = (0.01, 0.03)        # Random delay ngắn - cực nhanh
+    DELAY_MEDIUM = (0.03, 0.08)       # Random delay trung bình - rất nhanh
+    DELAY_LONG = (0.1, 0.2)           # Random delay dài - nhanh
+    TYPING_SPEED = (0.001, 0.003)     # Gõ siêu nhanh (gần như instant)
+    DELAY_BETWEEN_EMAILS = (1, 2)    # Delay giữa emails: 1-2s (int for randint)
+    PAGE_LOAD_WAIT = 0.1              # Đợi load trang - minimal
+    CAPTCHA_TIMEOUT = 30              # Timeout CAPTCHA: 30s (giữ nguyên để có thời gian giải)
 else:
     print("🐢 TURBO MODE: TẮT - An toàn hơn (ít CAPTCHA)")
     DELAY_SHORT = (0.3, 0.6)
@@ -1536,9 +1536,9 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
         random_delay(delay_type='short')
         human_like_type(email_field, email)
 
-        # Delay 1-1.5s sau khi nhập email (giảm từ 2-3s)
-        delay_after_typing = random.uniform(1, 1.5)
-        print(f"⏱️  Đợi {delay_after_typing:.1f}s sau khi nhập email (human-like behavior)...")
+        # Delay 0.3-0.5s sau khi nhập email (TURBO: giảm từ 1-1.5s)
+        delay_after_typing = random.uniform(0.3, 0.5) if TURBO_MODE else random.uniform(1, 1.5)
+        print(f"⏱️  Đợi {delay_after_typing:.1f}s sau khi nhập email...")
         time.sleep(delay_after_typing)
 
         # Bước 2: Click nút Continue
@@ -1571,8 +1571,8 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
             email_field.send_keys(Keys.RETURN)
             print("✓ Đã nhấn Enter trên email field")
 
-        # Đợi trang load sau Continue (giảm từ 2s xuống 1s)
-        time.sleep(1)
+        # Đợi trang load sau Continue (TURBO: 0.3s, normal: 1s)
+        time.sleep(0.3 if TURBO_MODE else 1)
 
         # Bước 3: Click nút "Sign up" (nếu có) - Timeout 3s
         print("\n[Bitbucket Login 3/5] Đang tìm nút 'Sign up' (timeout 3s)...")
@@ -1604,8 +1604,8 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
                 driver.execute_script("arguments[0].click();", signup_button)
                 print("✓ Đã click nút 'Sign up' (JavaScript)")
 
-            # Đợi trang load sau Sign up (giảm từ 2s xuống 1s)
-            time.sleep(1)
+            # Đợi trang load sau Sign up (TURBO: 0.3s, normal: 1s)
+            time.sleep(0.3 if TURBO_MODE else 1)
 
         # CAPTCHA Check sau Sign up - Dùng function đã cải tiến
         print("\n[CAPTCHA Check] Đang kiểm tra CAPTCHA sau Sign up...")
@@ -1792,7 +1792,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
     """
     try:
         print("\n=== BẮT ĐẦU CÁC BƯỚC SAU ĐĂNG NHẬP ===")
-        wait = WebDriverWait(driver, 20)
+        wait = WebDriverWait(driver, 10 if TURBO_MODE else 20)  # TURBO: giảm timeout
         allhands_tab = driver.current_window_handle  # Lưu tab All-Hands
 
         # Bước 1: Click nút "Grant access" (nếu có)
@@ -1849,9 +1849,9 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
         else:
             print("⚠ Không tìm thấy nút 'Grant access', có thể đã ở bước tiếp theo")
 
-        # Đợi redirect về All-Hands.dev
+        # Đợi redirect về All-Hands.dev (TURBO: 0.5s, normal: 2s)
         print("\nĐang đợi redirect về All-Hands.dev...")
-        time.sleep(2)
+        time.sleep(0.5 if TURBO_MODE else 2)
 
         # Bước 1.5: Kiểm tra email verification TRƯỚC
         print("\n[Post-Login 1.5/6] Kiểm tra email verification trước...")
@@ -1960,7 +1960,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
             # Mở verification link trong browser
             print("🔄 Đang mở verification link...")
             driver.get(verify_link)
-            time.sleep(1.5)  # Giảm từ 2s xuống 1.5s
+            time.sleep(0.5 if TURBO_MODE else 1.5)  # Giảm: mở verification link
 
             # Click "Click here to proceed" (nếu có)
             print("🔄 Đang tìm link 'Click here to proceed'...")
@@ -1985,7 +1985,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
                 if proceed_link:
                     proceed_link.click()
                     print("✓ Đã click 'Click here to proceed'")
-                    time.sleep(1.5)  # Giảm từ 2s xuống 1.5s
+                    time.sleep(0.3 if TURBO_MODE else 1.5)  # TURBO: 0.3s, normal: 1.5s
                 else:
                     print("⚠ Không tìm thấy link 'Click here to proceed', bỏ qua...")
             except Exception as e:
@@ -2014,11 +2014,11 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
                 if back_link:
                     back_link.click()
                     print("✓ Đã click 'Back to Application'")
-                    time.sleep(2)  # Giảm từ 3s xuống 2s
+                    time.sleep(0.5 if TURBO_MODE else 2)  # TURBO: 0.5s, normal: 2s
                 else:
                     print("⚠ Không tìm thấy link 'Back to Application', thử navigate trực tiếp...")
                     driver.get("https://app.all-hands.dev/?email_verified=true")
-                    time.sleep(2)
+                    time.sleep(0.5 if TURBO_MODE else 2)  # TURBO: 0.5s, normal: 2s
             except Exception as e:
                 print(f"⚠ Lỗi khi click 'Back to Application': {str(e)}")
 
@@ -2040,9 +2040,9 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
         driver.get(auth_url)
         print("✓ Đã mở tab mới và navigate đến URL auth")
 
-        # Đợi redirect về app (tự động login)
+        # Đợi redirect về app (tự động login) - TURBO: 0.5s, normal: 2s
         print("Đang đợi redirect về app.all-hands.dev...")
-        time.sleep(2)  # Giảm từ 3s xuống 2s
+        time.sleep(0.5 if TURBO_MODE else 2)
 
         try:
             WebDriverWait(driver, 10).until(
@@ -2083,7 +2083,7 @@ def handle_post_login_steps(driver, email, password, refresh_token=None, client_
         print("Đang tìm checkbox điều khoản sử dụng...")
 
         # Timeout cho checkbox và continue button
-        long_wait = WebDriverWait(driver, 15)
+        long_wait = WebDriverWait(driver, 8 if TURBO_MODE else 15)  # TURBO: giảm timeout
 
         checkbox_selectors = [
             (By.XPATH, "//input[@type='checkbox']"),

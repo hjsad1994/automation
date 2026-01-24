@@ -1,88 +1,163 @@
-<!-- OPENSPEC:START -->
-# OpenSpec Instructions
+# PROJECT KNOWLEDGE BASE
 
-These instructions are for AI assistants working in this project.
+**Generated:** 2026-01-25T03:25:00+07:00  
+**Commit:** 20e8f84  
+**Branch:** main
 
-Always open `@/openspec/AGENTS.md` when the request:
-- Mentions planning or proposals (words like proposal, spec, change, plan)
-- Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
-- Sounds ambiguous and you need the authoritative spec before coding
+## OVERVIEW
 
-Use `@/openspec/AGENTS.md` to learn:
-- How to create and apply change proposals
-- Spec format and conventions
-- Project structure and guidelines
+All-Hands.dev automation using Selenium + Python 3.13. Automates account registration via Bitbucket OAuth, retrieves API keys. Uses local proxy server for authenticated proxy support and dongvanfb.net API for email verification.
 
-Keep this managed block so 'openspec update' can refresh the instructions.
+## STRUCTURE
 
-<!-- OPENSPEC:END -->
-
-## Task Management with Beads (bd)
-
-This project uses **Beads** (`bd`) for task tracking. Always use `bd` commands to manage work.
-
-### Query Available Work
-```bash
-bd ready --json          # Tasks with no blockers (ready to work)
-bd list --json           # All tasks
-bd show <id> --json      # Task details
+```
+automation/
+├── allhands_auto_register.py   # Main entry (2627 LOC) - monolithic
+├── email_api_helper.py         # Email API functions (import only)
+├── proxy_server.py             # Standalone proxy server
+├── fetch_mail_*.py             # Utility scripts
+├── products.txt                # INPUT: email|pass|refresh|client_id
+├── api_keys.txt                # OUTPUT: username|sk_live_...
+├── errormail.txt               # FAILURES: append-only log
+├── .beads/                     # Task tracking (bd CLI)
+└── .venv/                      # Python 3.13 venv
 ```
 
-### Start Working on a Task
+## WHERE TO LOOK
+
+| Task | Location | Notes |
+|------|----------|-------|
+| Registration flow | `allhands_auto_register.py:1100-1800` | Direct Bitbucket auth URL |
+| Proxy setup | `allhands_auto_register.py:40-216` | Local forwarding proxy |
+| Email verification | `email_api_helper.py` | `wait_for_bitbucket_code()`, `wait_for_openhands_link()` |
+| WebDriver init | `allhands_auto_register.py:749-834` | undetected-chromedriver preferred |
+| Task management | `.beads/` | Use `bd` CLI |
+| Credentials | `.env` | MongoDB URI only |
+
+## CODE MAP
+
+| Symbol | Type | Location | Role |
+|--------|------|----------|------|
+| `main()` | func | allhands_auto_register.py | Entry point, batch processor |
+| `start_local_proxy_server()` | func | allhands_auto_register.py:163 | Spawns proxy thread |
+| `setup_driver()` | func | allhands_auto_register.py:749 | Chrome + proxy config |
+| `register_account()` | func | allhands_auto_register.py:1100+ | Full registration flow |
+| `wait_for_bitbucket_code()` | func | email_api_helper.py | SMS code via API |
+| `wait_for_openhands_link()` | func | email_api_helper.py | Email link via API |
+| `ProxyServer` | class | proxy_server.py | HTTP/HTTPS forwarding |
+
+## CONVENTIONS
+
+### Input Format (MANDATORY)
+```
+email|password|refresh_token|client_id
+```
+All 4 fields required. Old 2-field format NOT supported.
+
+### Global Flags
+```python
+TURBO_MODE = True        # Timing delays
+USE_PROXY = True         # Enable proxy.txt
+ENABLE_WARMUP = False    # Pre-navigation
+```
+
+### Proxy Architecture
+```
+Chrome → 127.0.0.1:18888 → Authenticated Upstream → Internet
+         [no auth]          [auth auto-added]
+```
+
+### Error Philosophy
+- Failed email → `errormail.txt` → continue processing
+- CAPTCHA → manual solve (300s timeout) → continue
+- Only stops: empty input, Ctrl+C, driver init failure
+
+## ANTI-PATTERNS (THIS PROJECT)
+
+### NEVER DO
+- Use `get_sms_from_api()` - DEPRECATED, returns status=False
+- Use old 2-field email format - NOT SUPPORTED
+- Use selenium-wire for proxy - Python 3.13 blinker conflicts
+- Use undetected-chromedriver + proxy - SSL certificate issues
+- Duplicate to api_keys.txt manually - auto-deduped
+- Delete tests to make build pass
+- Stop session before `git push` succeeds
+- Say "ready to push when you are" - YOU push
+
+### USE INSTEAD
+- `wait_for_bitbucket_code()` from email_api_helper.py
+- `wait_for_openhands_link()` from email_api_helper.py
+- Standard Selenium with local proxy server
+
+### DISABLED CODE (intentional)
+```python
+# Line 1033-1051: undetected-chromedriver + proxy (SSL issues)
+# Line 1070-1080: Proxy verification (already working)
+# Line 1004-1006: Original IP check (not needed)
+```
+
+## COMMANDS
+
 ```bash
+# Run main script
+python3 allhands_auto_register.py
+
+# Task management (Beads)
+bd ready --json              # Available tasks
+bd list --json               # All tasks
 bd update <id> --status in_progress
+bd close <id> --reason "..."
+bd sync                      # MANDATORY before session end
+
+# Session completion (MANDATORY)
+git pull --rebase && bd sync && git push
+git status  # Must show "up to date with origin"
 ```
 
-### Complete a Task
-```bash
-bd close <id> --reason "Completed: <what was done>"
-```
+## TASK MANAGEMENT (Beads)
 
-### Create New Tasks (discovered during work)
-```bash
-bd create "Task title" -p 1 --description "Details"
-bd create "Bug found" -p 0 --deps discovered-from:<parent-id>
-```
+Priority levels: P0 (critical) → P3 (low)
 
-### Add Dependencies
-```bash
-bd dep add <child> <parent>   # Child is blocked by Parent
-```
+### Current Open Tasks
+- **P0 auto-bk3**: Security - move credentials to .env, add .gitignore
+- **P1 auto-iue**: Custom exception classes
+- **P1 auto-dbx**: Parallel email processing
+- **P1 auto-1tc**: Docker support
+- **P2 auto-46i**: Structured logging
+- **P2 auto-msy**: Unit tests
 
-### Sync to Git (ALWAYS run before ending session)
-```bash
-bd sync
-```
+## SESSION COMPLETION (MANDATORY)
 
-### Current Project Tasks
-Run `bd ready` to see tasks available for work. Priority levels:
-- **P0**: Critical/Urgent
-- **P1**: High priority
-- **P2**: Medium priority
-- **P3**: Low priority
+Work is NOT complete until `git push` succeeds.
 
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+1. File issues for remaining work (`bd create`)
+2. Update issue status (`bd close` / `bd update`)
+3. Push to remote:
    ```bash
    git pull --rebase
    bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+**NEVER** stop before pushing - leaves work stranded locally.
+
+## NOTES
+
+### Performance (Email API vs Selenium)
+| Operation | Selenium | API | Savings |
+|-----------|----------|-----|---------|
+| Open Gmail | 5-8s | 0s | 5-8s |
+| Find email | 2-4s | 0.5s | 1.5-3.5s |
+| **Total** | 12-20s | 0.5s | **11.5-19.5s/email** |
+
+### Common Issues
+- Port 18888 in use → change LOCAL_PORT
+- Proxy offline → curl test detects before browser init
+- CAPTCHA → manual solve, script waits 300s
+
+### Missing Infrastructure
+- No CI/CD (.github/workflows)
+- No tests (pytest not configured)
+- No Docker (task auto-1tc pending)
+- No linters/formatters
