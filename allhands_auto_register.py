@@ -249,7 +249,7 @@ USE_PROXY = True  # Bật/tắt sử dụng proxy
 
 # PROXY API ROTATION - Xoay proxy tự động qua API
 PROXY_API_URL = "https://proxyxoay.shop/api/get.php"
-PROXY_API_KEY = "xdMiUWwRyzcuQIQgzyvWtz"
+PROXY_API_KEY = "tcLQfdoXPYtbjMZulCnJSs"
 PROXY_API_NETWORK = "random"  # random, viettel, fpt, vnpt, vinaphone, etc.
 PROXY_API_LOCATION = "0"      # 0=bất kỳ, hoặc mã tỉnh thành cụ thể
 
@@ -1614,13 +1614,50 @@ def login_bitbucket(driver, email, password, refresh_token, client_id, wait_time
         # Bước 4: Lấy SMS code từ API messages (thay vì API get_code)
         print("\n[Bitbucket Login 4/5] Đang lấy mã SMS từ API messages...")
 
-        # Dùng wait_for_bitbucket_code từ email_api_helper
+        # Callback function để click "Resend email" sau N lần thất bại
+        def click_resend_email():
+            """Click 'Didn't receive an email? Resend email' button"""
+            try:
+                resend_selectors = [
+                    # Selector chính xác theo HTML: <span class="css-1gd7hga">Didn't receive an email? Resend email</span>
+                    (By.XPATH, "//span[contains(@class, 'css-1gd7hga') and contains(text(), 'Resend')]"),
+                    (By.XPATH, "//span[contains(text(), \"Didn't receive an email\")]"),
+                    (By.XPATH, "//*[contains(text(), \"Didn't receive an email\")]"),
+                    (By.XPATH, "//span[contains(text(), 'Resend email')]"),
+                    (By.XPATH, "//button[contains(text(), 'Resend email')]"),
+                    (By.CSS_SELECTOR, "span.css-1gd7hga"),
+                ]
+                
+                for by, selector in resend_selectors:
+                    try:
+                        resend_elem = WebDriverWait(driver, 3).until(
+                            EC.element_to_be_clickable((by, selector))
+                        )
+                        try:
+                            resend_elem.click()
+                        except:
+                            driver.execute_script("arguments[0].click();", resend_elem)
+                        print("✓ Đã click 'Resend email'")
+                        time.sleep(2)  # Đợi email mới được gửi
+                        return True
+                    except:
+                        continue
+                
+                print("⚠ Không tìm thấy nút 'Resend email'")
+                return False
+            except Exception as e:
+                print(f"✗ Lỗi khi click Resend email: {str(e)}")
+                return False
+
+        # Dùng wait_for_bitbucket_code từ email_api_helper với resend callback
         sms_code = wait_for_bitbucket_code(
             email=email,
             refresh_token=refresh_token,
             client_id=client_id,
             max_wait=120,  # Đợi tối đa 120s
-            check_interval=5  # Check mỗi 5s
+            check_interval=5,  # Check mỗi 5s
+            resend_callback=click_resend_email,  # Callback để click Resend
+            resend_after_attempts=4  # Sau 4 lần check thất bại → click Resend
         )
 
         # Nếu có SMS code, điền vào 6 ô OTP riêng biệt
