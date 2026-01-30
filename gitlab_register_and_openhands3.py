@@ -2,12 +2,16 @@
 """
 Script tự động ĐĂNG KÝ GITLAB + LOGIN OPENHANDS + LẤY API KEY
 
-WORKFLOW ĐÚNG:
-1. Đăng ký GitLab.com (điền form + xử lý CAPTCHA)
-2. VERIFY EMAIL GITLAB (điền code 6 số từ email) ← BẮT BUỘC!
-3. SAU KHI VERIFY XONG → Mở tab mới → Chuyển sang OpenHands.dev
-4. Login OpenHands qua GitLab OAuth (GitLab đã login + verify rồi)
-5. Lấy API key từ OpenHands /settings/api-keys
+WORKFLOW:
+1. Warmup: Mở GitLab /sign_in để pass Cloudflare
+2. Mở tab mới → Vào GitLab /sign_up trực tiếp
+3. Điền form đăng ký GitLab + xử lý CAPTCHA
+4. VERIFY EMAIL GITLAB (điền code 6 số từ email)
+5. Mở tab mới → dongvanfb.net/read_mail_box/ + paste credentials
+6. Mở tab mới → OpenHands /login
+7. Click "Log in with GitLab" → Authorize
+8. ⏸️ SCRIPT DỪNG → User tự xử lý CAPTCHA + lấy API key
+9. User nhấn ENTER → Chuyển sang email tiếp theo
 
 QUAN TRỌNG: 
 - PHẢI verify email GitLab TRƯỚC thì mới login OpenHands được
@@ -66,8 +70,9 @@ except ImportError:
 # SETTINGS
 # ============================================================
 
-# ixBrowser Profile ID - Dùng profile 2
-IXBROWSER_PROFILE_ID = 2  # Hardcode profile 2 cho script này
+# ixBrowser Profile ID (Profile 3)
+_ixbrowser_profile_id_str = os.getenv("IXBROWSER_PROFILE_ID_3", "")
+IXBROWSER_PROFILE_ID = int(_ixbrowser_profile_id_str) if _ixbrowser_profile_id_str.isdigit() else None
 
 # ixBrowser API
 IXBROWSER_API_HOST = "127.0.0.1"
@@ -78,9 +83,9 @@ GITLAB_SIGNUP_URL = "https://gitlab.com/users/sign_up"
 OPENHANDS_LOGIN_URL = "https://app.all-hands.dev/login"
 OPENHANDS_API_KEYS_URL = "https://app.all-hands.dev/settings/api-keys"
 
-# Files - Dùng file riêng cho script 2
-EMAIL_FILE = "products2.txt"  # Format: email|password|refresh_token|client_id
-API_KEYS_FILE = "api_keys2.txt"
+# Files (Profile 3 uses products3.txt)
+EMAIL_FILE = "products3.txt"  # Format: email|password|refresh_token|client_id
+API_KEYS_FILE = "api_keys.txt"
 ERROR_LOG_FILE = "errormail.txt"
 
 # Timing
@@ -361,13 +366,14 @@ def register_gitlab(driver, email, password):
         
         print("[5/5] Điền Password...")
         password_field = driver.find_element(By.ID, "new_user_password")
-        human_like_type(password_field, password)
+        password_field.clear()
+        password_field.send_keys("Aa@123456X")  # Hardcoded password cho GitLab signup
         random_delay('short')
         
         print("\n✓ Đã điền đầy đủ form!")
         
         # Đợi backend validate
-        delay = random.uniform(5, 7)
+        delay = random.uniform(10, 11)
         print(f"\n[GitLab] Đợi {delay:.1f}s để backend validate...")
         time.sleep(delay)
         
@@ -427,7 +433,7 @@ def register_gitlab(driver, email, password):
                                         EC.presence_of_element_located((By.ID, "new_user_password"))
                                     )
                                     password_field.clear()
-                                    human_like_type(password_field, password)
+                                    password_field.send_keys("Aa@123456X")  # Hardcoded password
                                     print("  ✓ Đã nhập lại password")
                                     time.sleep(1)
                                     
@@ -580,7 +586,7 @@ def verify_gitlab_email(driver, email, refresh_token, client_id):
         
         # Kiểm tra URL hiện tại với retry logic
         current_url = ""
-        max_retries = 3
+        max_retries = 6
         
         for attempt in range(max_retries):
             try:
@@ -853,545 +859,23 @@ def login_openhands_gitlab(driver, email, refresh_token, client_id):
                 print("  ⚠ Không tìm thấy nút Authorize")
                 print("  → Có thể đã authorize trước đó hoặc tự động approve")
         
-        # Check email verification
-        print(f"\n[OpenHands] Kiểm tra email verification...")
-        current_url = driver.current_url
-        print(f"URL: {current_url}")
-        
-        # NẾU VẪN Ở /login SAU KHI AUTHORIZE → Vào direct auth URL ngay
-        if "login" in current_url.lower():
-            print("  → Vẫn ở trang login, bypass bằng direct auth URL...")
-            DIRECT_AUTH_URL = "https://auth.app.all-hands.dev/realms/allhands/protocol/openid-connect/auth?client_id=allhands&kc_idp_hint=gitlab&response_type=code&redirect_uri=https%3A%2F%2Fapp.all-hands.dev%2Foauth%2Fkeycloak%2Fcallback&scope=openid+email+profile&state=https%3A%2F%2Fapp.all-hands.dev%3Flogin_method%3Dgitlab&login_method=gitlab"
-            driver.get(DIRECT_AUTH_URL)
-            time.sleep(3)
-            current_url = driver.current_url
-            print(f"  URL sau direct auth: {current_url}")
-        
-        # NẾU Ở GITLAB OAUTH AUTHORIZE → Click Authorize trước
-        if "gitlab.com/oauth/authorize" in current_url:
-            print("  → Đang ở GitLab OAuth, cần click Authorize...")
-            try:
-                # Tìm nút Authorize trên GitLab
-                authorize_btn = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[@type='submit' and contains(., 'Authorize')]"))
-                )
-                authorize_btn.click()
-                print("  ✓ Đã click Authorize trên GitLab")
-                time.sleep(3)
-                current_url = driver.current_url
-                print(f"  URL sau Authorize: {current_url}")
-            except:
-                # Thử selector khác
-                try:
-                    authorize_btn = driver.find_element(By.CSS_SELECTOR, "input[type='submit'][value='Authorize'], button[type='submit']")
-                    authorize_btn.click()
-                    print("  ✓ Đã click Authorize (fallback)")
-                    time.sleep(3)
-                    current_url = driver.current_url
-                except Exception as e:
-                    print(f"  ⚠ Không click được Authorize: {str(e)[:50]}")
-        
-        # NẾU Ở ACCEPT-TOS SAU AUTHORIZE → Xử lý luôn
-        if "/accept-tos" in current_url:
-            print("  → Đang ở trang Accept TOS...")
-            try:
-                tos_checkbox = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox']"))
-                )
-                tos_checkbox.click()
-                print("  ✓ Đã click checkbox Terms")
-                time.sleep(0.5)
-                
-                tos_continue = WebDriverWait(driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue') or contains(text(), 'Accept')]"))
-                )
-                tos_continue.click()
-                print("  ✓ Đã click Continue/Accept")
-                time.sleep(3)
-                
-                print("  ✅ Đã accept TOS thành công!")
-                return True
-            except Exception as e:
-                print(f"  ⚠ Lỗi TOS: {str(e)[:50]}")
-                current_url = driver.current_url
-        
-        # Check xem có yêu cầu verify email không
-        if "email_verification_required=true" in current_url:
-            print("⚠ OpenHands yêu cầu verify email!")
-        
-        # Tìm nút Resend verification với nhiều selector
-        short_wait = WebDriverWait(driver, 5)
-        resend_button = None
-        resend_selectors = [
-            (By.XPATH, "//button[contains(text(), 'Resend verification')]"),
-            (By.XPATH, "//button[contains(., 'Resend')]"),
-            (By.XPATH, "//button[contains(@class, 'bg-primary') and contains(., 'Resend')]"),
-            (By.XPATH, "//a[contains(text(), 'Resend')]"),
-            (By.CSS_SELECTOR, "button.bg-primary"),
-        ]
-        
-        for by, selector in resend_selectors:
-            try:
-                resend_button = short_wait.until(EC.element_to_be_clickable((by, selector)))
-                print(f"✓ Tìm thấy 'Resend verification' với selector: {selector[:50]}")
-                break
-            except TimeoutException:
-                continue
-        
-        if not resend_button:
-            print("⚠ Không tìm thấy 'Resend verification'")
-            
-            # Nếu có email_verification_required → thử lấy link từ email đã có
-            if "email_verification_required=true" in current_url:
-                print("  → Thử lấy verification link từ email (có thể đã gửi trước đó)...")
-                verify_link = wait_for_openhands_link(
-                    email=email,
-                    refresh_token=refresh_token,
-                    client_id=client_id,
-                    max_wait=30,  # Đợi ngắn hơn vì có thể đã có email
-                    check_interval=3
-                )
-                
-                if verify_link:
-                    print("✓ Tìm thấy verification link trong email!")
-                    # Xử lý verify link
-                    driver.get(verify_link)
-                    time.sleep(1)
-                    
-                    try:
-                        proceed_link = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//a[contains(., 'Click here to proceed')]"))
-                        )
-                        proceed_link.click()
-                        print("✓ Đã click 'Click here to proceed'")
-                        time.sleep(1)
-                    except:
-                        pass
-                    
-                    try:
-                        back_link = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//a[contains(., 'Back to Application')]"))
-                        )
-                        back_link.click()
-                        print("✓ Đã click 'Back to Application'")
-                        time.sleep(2)
-                    except:
-                        driver.get("https://app.all-hands.dev/?email_verified=true")
-                        time.sleep(2)
-                else:
-                    print("  → Không tìm thấy email verification")
-        
-        if resend_button:
-            # Click resend
-            try:
-                resend_button.click()
-                print("✓ Đã click Resend")
-            except:
-                driver.execute_script("arguments[0].click();", resend_button)
-                print("✓ Đã click Resend (JS)")
-            
-            time.sleep(2)
-            
-            # Lấy verification link từ email
-            print("\n[OpenHands] Đang lấy verification link từ email...")
-            verify_link = wait_for_openhands_link(
-                email=email,
-                refresh_token=refresh_token,
-                client_id=client_id,
-                max_wait=120,
-                check_interval=5
-            )
-            
-            if not verify_link:
-                print("⚠ Không nhận được email verification")
-            else:
-                print("✓ Đã lấy verification link")
-                
-                # Mở link
-                driver.get(verify_link)
-                time.sleep(1)
-                
-                # Click "Click here to proceed"
-                try:
-                    proceed_link = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//a[contains(., 'Click here to proceed')]"))
-                    )
-                    proceed_link.click()
-                    print("✓ Đã click 'Click here to proceed'")
-                    time.sleep(1)
-                except:
-                    pass
-                
-                # Click "Back to Application"
-                try:
-                    back_link = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//a[contains(., 'Back to Application')]"))
-                    )
-                    back_link.click()
-                    print("✓ Đã click 'Back to Application'")
-                    time.sleep(2)
-                except:
-                    driver.get("https://app.all-hands.dev/?email_verified=true")
-                    time.sleep(2)
-        
-        # Check login status
-        print(f"\n[OpenHands] Kiểm tra login status...")
-        current_url = driver.current_url
-        print(f"URL: {current_url}")
-        
-        # Retry nếu còn ở trang login HOẶC accept-tos
-        retry_count = 0
-        max_retries = 2
-        while ("login" in current_url.lower() or "/accept-tos" in current_url) and retry_count < max_retries:
-            retry_count += 1
-            
-            # Nếu ở /accept-tos → xử lý trực tiếp, không cần click GitLab
-            if "/accept-tos" in current_url:
-                print(f"\n[OpenHands] Đang ở trang Accept Terms of Service")
-                try:
-                    # Click checkbox
-                    tos_checkbox = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox']"))
-                    )
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", tos_checkbox)
-                    time.sleep(0.3)
-                    tos_checkbox.click()
-                    print("  ✓ Đã click checkbox Terms")
-                    time.sleep(0.5)
-                    
-                    # Click Continue
-                    tos_continue = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue') or contains(text(), 'Continuer') or contains(text(), 'Accept')]"))
-                    )
-                    tos_continue.click()
-                    print("  ✓ Đã click Continue/Accept")
-                    time.sleep(3)
-                    
-                    # Update URL
-                    current_url = driver.current_url
-                    print(f"  URL sau accept TOS: {current_url}")
-                    
-                    # SAU KHI ACCEPT TOS: Đã login rồi, thoát loop luôn
-                    # (URL có thể vẫn là /login?... nhưng thực tế đã authenticated)
-                    print("  ✅ Đã accept TOS thành công! Chuyển sang lấy API key...")
-                    return True  # Thoát function, đã login thành công
-                        
-                except Exception as e:
-                    print(f"  ⚠ Lỗi xử lý TOS: {str(e)[:50]}")
-                
-                current_url = driver.current_url
-                continue
-            
-            # Nếu ở /login → vào trực tiếp URL auth với kc_idp_hint=gitlab
-            print(f"\n⚠ Vẫn ở trang login (retry {retry_count}/{max_retries})")
-            print("  → Vào trực tiếp URL auth (bypass login page)...")
-            
-            # URL auth trực tiếp với kc_idp_hint=gitlab
-            DIRECT_AUTH_URL = "https://auth.app.all-hands.dev/realms/allhands/protocol/openid-connect/auth?client_id=allhands&kc_idp_hint=gitlab&response_type=code&redirect_uri=https%3A%2F%2Fapp.all-hands.dev%2Foauth%2Fkeycloak%2Fcallback&scope=openid+email+profile&state=https%3A%2F%2Fapp.all-hands.dev%3Flogin_method%3Dgitlab&login_method=gitlab"
-            
-            driver.get(DIRECT_AUTH_URL)
-            time.sleep(3)
-            
-            # SAU KHI VÀO DIRECT AUTH URL: Check kết quả
-            current_url_after = driver.current_url
-            print(f"  URL sau direct auth: {current_url_after}")
-            
-            # CHECK 0: Nếu vẫn ở /login → check xem có nút Resend verification không
-            if "login" in current_url_after.lower():
-                print("  → Vẫn ở trang login, kiểm tra nút Resend verification...")
-                try:
-                    resend_btn = WebDriverWait(driver, 3).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Resend') or contains(., 'Resend')]"))
-                    )
-                    print("  ✓ Tìm thấy nút Resend verification!")
-                    resend_btn.click()
-                    print("  ✓ Đã click Resend")
-                    time.sleep(2)
-                    
-                    # Đợi email verification link
-                    print("  → Đang đợi email verification link...")
-                    verify_link = wait_for_openhands_link(
-                        email=email,
-                        refresh_token=refresh_token,
-                        client_id=client_id,
-                        max_wait=60,
-                        check_interval=5
-                    )
-                    
-                    if verify_link:
-                        print(f"  ✓ Nhận được verification link!")
-                        driver.get(verify_link)
-                        time.sleep(2)
-                        
-                        # Click "Click here to proceed" nếu có
-                        try:
-                            proceed_link = WebDriverWait(driver, 5).until(
-                                EC.element_to_be_clickable((By.XPATH, "//a[contains(., 'Click here to proceed')]"))
-                            )
-                            proceed_link.click()
-                            print("  ✓ Đã click 'Click here to proceed'")
-                            time.sleep(2)
-                        except:
-                            pass
-                        
-                        # Click "Back to Application" nếu có
-                        try:
-                            back_link = WebDriverWait(driver, 5).until(
-                                EC.element_to_be_clickable((By.XPATH, "//a[contains(., 'Back to Application')]"))
-                            )
-                            back_link.click()
-                            print("  ✓ Đã click 'Back to Application'")
-                            time.sleep(2)
-                        except:
-                            pass
-                        
-                        # SAU KHI VERIFY EMAIL: Vào direct auth để tiếp tục flow
-                        print("  → Email đã verify, vào direct auth để login...")
-                        driver.get(DIRECT_AUTH_URL)
-                        time.sleep(3)
-                        
-                        # Update URL để các CHECK phía dưới xử lý tiếp
-                        current_url_after = driver.current_url
-                        print(f"  URL sau direct auth (post-verify): {current_url_after}")
-                        
-                        # Nếu đã qua login luôn → thành công
-                        if "login" not in current_url_after.lower() and "/accept-tos" not in current_url_after:
-                            print("  ✅ Email verified và login thành công!")
-                            return True
-                        
-                        # Nếu không thì để các CHECK phía dưới xử lý tiếp (accept-tos, etc.)
-                        
-                    else:
-                        print("  ⚠ Không nhận được verification link")
-                        
-                except TimeoutException:
-                    print("  → Không tìm thấy nút Resend")
-                except Exception as e:
-                    print(f"  ⚠ Lỗi xử lý Resend: {str(e)[:50]}")
-            
-            # CHECK 1: Nếu ở trang /accept-tos → click checkbox + Continue
-            if "/accept-tos" in current_url_after:
-                print("  → Đang ở trang Accept Terms of Service")
-                try:
-                    # Click checkbox
-                    tos_checkbox = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox']"))
-                    )
-                    driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", tos_checkbox)
-                    time.sleep(0.3)
-                    tos_checkbox.click()
-                    print("  ✓ Đã click checkbox Terms")
-                    time.sleep(0.5)
-                    
-                    # Click Continue
-                    tos_continue = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue') or contains(text(), 'Continuer') or contains(text(), 'Accept')]"))
-                    )
-                    tos_continue.click()
-                    print("  ✓ Đã click Continue/Accept")
-                    time.sleep(3)
-                    
-                    print("  ✅ Đã accept TOS và login thành công!")
-                    return True  # Đã login, chuyển sang lấy API key
-                        
-                except Exception as e:
-                    print(f"  ⚠ Lỗi xử lý TOS: {str(e)[:50]}")
-                
-                current_url = driver.current_url
-                continue  # Tiếp tục loop để check lại
-            
-            # CHECK 2: Nếu ở GitLab OAuth authorize
-            if "/oauth/authorize" in current_url_after or "gitlab.com" in current_url_after:
-                print("  → Đang ở trang GitLab OAuth Authorization")
-                try:
-                    authorize_btn = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button//span[contains(text(), 'Authorize')]"))
-                    )
-                    authorize_btn.click()
-                    print("  ✓ Đã click Authorize")
-                    time.sleep(3)
-                except:
-                    print("  → Không thấy nút Authorize (có thể đã authorize rồi)")
-                
-                # Check lại sau authorize
-                current_url = driver.current_url
-                print(f"  URL sau authorize: {current_url}")
-                
-                # Nếu ở accept-tos sau authorize
-                if "/accept-tos" in current_url:
-                    try:
-                        tos_checkbox = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox']"))
-                        )
-                        tos_checkbox.click()
-                        print("  ✓ Đã click checkbox Terms")
-                        time.sleep(0.5)
-                        
-                        tos_continue = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue') or contains(text(), 'Accept')]"))
-                        )
-                        tos_continue.click()
-                        print("  ✓ Đã click Continue/Accept")
-                        time.sleep(3)
-                        
-                        print("  ✅ Đã accept TOS và login thành công!")
-                        return True
-                    except Exception as e:
-                        print(f"  ⚠ Lỗi TOS: {str(e)[:50]}")
-                
-                # Nếu không còn ở login → thành công
-                if "login" not in current_url.lower():
-                    print("  ✅ Login thành công!")
-                    return True
-                    
-                continue
-            
-            # CHECK 3: Nếu đã qua login (redirect về app)
-            if "login" not in current_url_after.lower():
-                print("  ✅ Đã login thành công qua direct auth!")
-                return True
-            
-            # Update URL cho vòng lặp tiếp theo
-            current_url = current_url_after
-        
-        # Sau khi hết retry loop, check final status
-        current_url = driver.current_url
-        
-        if "login" in current_url.lower():
-            # Kiểm tra xem có phải do email_verification_required không
-            if "email_verification_required=true" in current_url:
-                print("\n⚠ Vẫn yêu cầu verify email sau 2 lần retry")
-                print("  → Thử vào trực tiếp URL auth với kc_idp_hint=gitlab...")
-                
-                # URL auth trực tiếp - bypass trang login
-                DIRECT_AUTH_URL = "https://auth.app.all-hands.dev/realms/allhands/protocol/openid-connect/auth?client_id=allhands&kc_idp_hint=gitlab&response_type=code&redirect_uri=https%3A%2F%2Fapp.all-hands.dev%2Foauth%2Fkeycloak%2Fcallback&scope=openid+email+profile&state=https%3A%2F%2Fapp.all-hands.dev%3Flogin_method%3Dgitlab&login_method=gitlab"
-                
-                print(f"  → Đang vào: {DIRECT_AUTH_URL[:80]}...")
-                driver.get(DIRECT_AUTH_URL)
-                time.sleep(3)
-                
-                auth_url = driver.current_url
-                print(f"  URL sau redirect: {auth_url}")
-                
-                # Nếu ở trang OAuth authorize → click Authorize
-                if "/oauth/authorize" in auth_url or "gitlab.com" in auth_url:
-                    print("  → Đang ở trang GitLab OAuth, thử click Authorize...")
-                    try:
-                        auth_btn = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//button//span[contains(text(), 'Authorize')]"))
-                        )
-                        auth_btn.click()
-                        print("  ✓ Đã click Authorize")
-                        time.sleep(3)
-                    except:
-                        print("  → Không thấy nút Authorize (có thể đã authorize rồi)")
-                
-                # Check accept-tos
-                current_url = driver.current_url
-                if "/accept-tos" in current_url:
-                    print("  → Đang ở trang Accept TOS...")
-                    try:
-                        tos_checkbox = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox']"))
-                        )
-                        tos_checkbox.click()
-                        print("  ✓ Đã click checkbox Terms")
-                        time.sleep(0.5)
-                        
-                        tos_continue = WebDriverWait(driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue') or contains(text(), 'Accept')]"))
-                        )
-                        tos_continue.click()
-                        print("  ✓ Đã click Continue/Accept")
-                        time.sleep(3)
-                        
-                        print("  ✅ Đã accept TOS thành công!")
-                        return True
-                    except Exception as e:
-                        print(f"  ⚠ Lỗi xử lý TOS: {str(e)[:50]}")
-                
-                # Check kết quả cuối
-                final_url = driver.current_url
-                print(f"  URL cuối cùng: {final_url}")
-                
-                if "login" not in final_url.lower() or "/accept-tos" in final_url:
-                    print("  ✅ Login thành công qua direct auth URL!")
-                    return True
-                else:
-                    # Fallback: thử mở tab mới
-                    print("  → Direct auth không work, thử mở TAB MỚI...")
-                    
-                    driver.execute_script("window.open('');")
-                    time.sleep(1)
-                    driver.switch_to.window(driver.window_handles[-1])
-                    print("  ✓ Đã mở tab mới")
-                    
-                    # Vào GitLab để đảm bảo session vẫn còn
-                    print("  → Đang vào GitLab để refresh session...")
-                    driver.get("https://gitlab.com/users/sign_in")
-                    time.sleep(3)
-                    
-                    gitlab_url = driver.current_url
-                    print(f"  URL GitLab: {gitlab_url}")
-                    
-                    if "sign_in" not in gitlab_url or "users/" in gitlab_url:
-                        print("  ✓ GitLab session vẫn còn")
-                    
-                    # Thử direct auth URL lần nữa từ tab mới
-                    print("  → Thử direct auth URL lần nữa...")
-                    driver.get(DIRECT_AUTH_URL)
-                    time.sleep(3)
-                    
-                    final_url = driver.current_url
-                    print(f"  URL cuối: {final_url}")
-                    
-                    if "login" not in final_url.lower():
-                        print("  ✅ Login thành công từ tab mới!")
-                        return True
-                    else:
-                        print("✗ Vẫn không thể login")
-                        return False
-            else:
-                print("✗ Không thể login sau khi retry")
-                return False
-        
-        print("✓ Đã login thành công!")
-        
-        # Click checkbox Terms of Service
-        print(f"\n[OpenHands] Kiểm tra Terms of Service...")
-        try:
-            checkbox = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, "//input[@type='checkbox']"))
-            )
-            driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", checkbox)
-            time.sleep(0.3)
-            try:
-                checkbox.click()
-                print("✓ Đã click checkbox")
-            except:
-                driver.execute_script("arguments[0].click();", checkbox)
-                print("✓ Đã click checkbox (JS)")
-            time.sleep(0.5)
-            
-            # Click Continue
-            continue_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue') or contains(text(), 'Continuer')]"))
-            )
-            try:
-                continue_button.click()
-                print("✓ Đã click Continue")
-            except:
-                driver.execute_script("arguments[0].click();", continue_button)
-                print("✓ Đã click Continue (JS)")
-            
-            time.sleep(2)
-        except TimeoutException:
-            print("⚠ Không tìm thấy Terms checkbox")
-        
+        # ============================================================
+        # DỪNG LẠI ĐỂ USER TỰ XỬ LÝ (CAPTCHA phức tạp)
+        # ============================================================
         print("\n" + "=" * 60)
-        print("✅ ĐÃ ĐĂNG NHẬP OPENHANDS THÀNH CÔNG!")
+        print("⏸️  SCRIPT TẠM DỪNG - USER TỰ XỬ LÝ")
         print("=" * 60)
-        return True
+        print("Bước tiếp theo cần thực hiện THỦ CÔNG:")
+        print("  1. Hoàn thành đăng nhập OpenHands (nếu cần)")
+        print("  2. Xử lý CAPTCHA (nếu có)")
+        print("  3. Lấy API key từ Settings → API Keys")
+        print("  4. Copy API key vào file api_keys.txt (nếu muốn)")
+        print("=" * 60)
+        print("\n👉 Nhấn ENTER khi đã xong để chuyển sang email tiếp theo...")
+        input()
+        
+        print("\n✅ User đã xác nhận xong, tiếp tục...")
+        return True  # Coi như thành công, user đã tự xử lý
         
     except Exception as e:
         print(f"\n✗ Lỗi khi login OpenHands: {str(e)}")
@@ -1528,12 +1012,13 @@ def save_api_key(email, api_key):
         print(f"✗ Lỗi khi lưu: {str(e)}")
 
 
-def log_error(email, error_msg):
-    """Ghi log lỗi"""
+def log_error(email, password, refresh_token, client_id, error_msg):
+    """Ghi log lỗi - format giống products.txt để dễ login lại"""
     try:
         with open(ERROR_LOG_FILE, 'a', encoding='utf-8') as f:
-            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-            f.write(f"{timestamp}|{email}|{error_msg}\n")
+            # Format: email|password|refresh_token|client_id (giống products.txt)
+            # Để dễ copy paste chạy lại
+            f.write(f"{email}|{password}|{refresh_token}|{client_id}\n")
     except:
         pass
 
@@ -1583,7 +1068,7 @@ def main():
                 success_signup = register_gitlab(driver, email, password)
                 if not success_signup:
                     print(f"✗ Đăng ký GitLab thất bại")
-                    log_error(email, "GitLab signup failed")
+                    log_error(email, password, refresh_token, client_id, "GitLab signup failed")
                     continue
                 
                 # Step 2: Verify GitLab email TRƯỚC
@@ -1591,17 +1076,41 @@ def main():
                 if not success_verify:
                     print(f"⚠ Verify GitLab có vấn đề, nhưng vẫn thử login OpenHands...")
                 
-                # Step 3: Sau khi verify xong → MỞ TAB MỚI và chuyển sang OpenHands
-                print(f"\n[STEP 3: Mở tab mới và chuyển sang OpenHands]")
+                # Step 3: Mở trang dongvanfb.net và paste credentials
+                print(f"\n[STEP 3: Mở dongvanfb.net để chuẩn bị đọc mail]")
+                print("Đang mở tab mới cho dongvanfb.net...")
+                
+                driver.execute_script("window.open('');")
+                time.sleep(0.5)
+                driver.switch_to.window(driver.window_handles[-1])
+                
+                driver.get("https://dongvanfb.net/read_mail_box/")
+                time.sleep(2)
+                
+                # Paste credentials vào textarea
+                credentials_line = f"{email}|{password}|{refresh_token}|{client_id}"
+                print(f"  Đang paste credentials vào textarea...")
+                
+                try:
+                    textarea = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.ID, "list_email"))
+                    )
+                    textarea.clear()
+                    textarea.send_keys(credentials_line)
+                    print(f"  ✓ Đã paste: {email}|***|***|***")
+                except Exception as e:
+                    print(f"  ⚠ Không paste được: {str(e)[:50]}")
+                
+                # Step 4: Mở tab mới và chuyển sang OpenHands
+                print(f"\n[STEP 4: Mở tab mới và chuyển sang OpenHands]")
                 print("Đang mở tab mới...")
                 
-                # Lưu tab GitLab hiện tại
+                # Lưu tab hiện tại
                 try:
-                    gitlab_tab = driver.current_window_handle
-                    print(f"  GitLab tab: {gitlab_tab[:8]}...")
+                    current_tab = driver.current_window_handle
+                    print(f"  Current tab: {current_tab[:8]}...")
                 except Exception as e:
-                    print(f"  ⚠ Không lấy được GitLab tab handle: {str(e)[:50]}")
-                    gitlab_tab = None
+                    print(f"  ⚠ Không lấy được tab handle: {str(e)[:50]}")
                 
                 # Mở tab mới
                 driver.execute_script("window.open('');")
@@ -1613,22 +1122,14 @@ def main():
                 driver.switch_to.window(openhands_tab)
                 print(f"  ✓ Đã mở tab mới: {openhands_tab[:8]}...")
                 
-                # Step 4: Login OpenHands
+                # Step 5: Login OpenHands (sau đó user tự xử lý)
                 success_login = login_openhands_gitlab(driver, email, refresh_token, client_id)
                 if not success_login:
                     print(f"✗ Login OpenHands thất bại")
-                    log_error(email, "OpenHands login failed")
+                    log_error(email, password, refresh_token, client_id, "OpenHands login failed")
                     continue
                 
-                # Step 5: Get API key
-                api_key = get_api_key(driver)
-                if not api_key:
-                    print(f"✗ Không lấy được API key")
-                    log_error(email, "API key not found")
-                    continue
-                
-                # Save API key
-                save_api_key(email, api_key)
+                # NOTE: User đã nhấn Enter sau khi hoàn thành
                 
                 print("\n" + "=" * 60)
                 print(f"✅ HOÀN THÀNH: {email}")
@@ -1636,7 +1137,7 @@ def main():
                 
             except Exception as e:
                 print(f"\n✗ Lỗi: {str(e)}")
-                log_error(email, str(e))
+                log_error(email, password, refresh_token, client_id, str(e))
                 import traceback
                 traceback.print_exc()
             
