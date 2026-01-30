@@ -162,6 +162,117 @@ def extract_openhands_verification_link(messages: list) -> Optional[str]:
         return None
 
 
+def extract_gitlab_verification_code(messages: list) -> Optional[str]:
+    """
+    Tìm và extract verification CODE 6 số từ GitLab
+
+    Format email:
+    - From: gitlab@mg.gitlab.com hoặc noreply@gitlab.com
+    - Body chứa: code trong thẻ <div> với font-weight:700
+      VD: <div style="...font-weight:700;...">689923 </div>
+
+    Returns:
+        Verification code (6 số) hoặc None
+    """
+    try:
+        for msg in messages:
+            # Check sender - handle both string and list format
+            from_field = msg.get("from", "")
+            if isinstance(from_field, list) and from_field:
+                from_address = from_field[0].get("address", "") if isinstance(from_field[0], dict) else from_field[0]
+            elif isinstance(from_field, str):
+                from_address = from_field
+            else:
+                from_address = ""
+
+            subject = msg.get("subject", "")
+            message_body = msg.get("message", "")
+
+            # Kiểm tra xem có phải email từ GitLab không
+            is_gitlab = "gitlab" in from_address.lower() or "gitlab" in subject.lower()
+            
+            if is_gitlab or "verification" in subject.lower() or "confirm" in subject.lower():
+                # Pattern ưu tiên: code trong thẻ div có font-weight:700 (format GitLab)
+                # VD: <div style="...font-weight:700;...">689923 </div>
+                pattern_div = r'<div[^>]*font-weight:\s*700[^>]*>\s*(\d{6})\s*</div>'
+                matches = re.findall(pattern_div, message_body, re.IGNORECASE)
+                if matches:
+                    code = matches[0]
+                    print(f"✓ Tìm thấy GitLab verification code (div pattern): {code}")
+                    return code
+                
+                # Pattern thứ 2: code nằm giữa 2 thẻ > và <
+                # VD: >689923<  hoặc >689923 </div>
+                pattern_tags = r'>\s*(\d{6})\s*<'
+                matches = re.findall(pattern_tags, message_body)
+                if matches:
+                    # Loại bỏ các code là mã màu (thường xuất hiện sau color: hoặc #)
+                    for code in matches:
+                        # Kiểm tra xem code có phải mã màu không
+                        color_pattern = f'(color[:#]\\s*{code}|#{code})'
+                        if not re.search(color_pattern, message_body, re.IGNORECASE):
+                            print(f"✓ Tìm thấy GitLab verification code (tag pattern): {code}")
+                            return code
+                
+                # Pattern thứ 3: "enter the following code" hoặc "verification code"
+                patterns_text = [
+                    r'enter the following code[.\s:]*[^0-9]*?(\d{6})',
+                    r'verification code[.\s:]*[^0-9]*?(\d{6})',
+                ]
+                
+                for pattern in patterns_text:
+                    matches = re.findall(pattern, message_body, re.IGNORECASE)
+                    if matches:
+                        code = matches[0]
+                        print(f"✓ Tìm thấy GitLab verification code (text pattern): {code}")
+                        return code
+
+        print("✗ Không tìm thấy GitLab verification code")
+        return None
+
+    except Exception as e:
+        print(f"✗ Lỗi khi extract GitLab code: {str(e)}")
+        return None
+
+
+def wait_for_gitlab_verification_code(email: str, refresh_token: str, client_id: str,
+                                       max_wait: int = 120, check_interval: int = 5) -> Optional[str]:
+    """
+    Đợi và lấy GitLab verification CODE (6 số)
+
+    Args:
+        email: Email address
+        refresh_token: OAuth2 token
+        client_id: Client ID
+        max_wait: Thời gian đợi tối đa (giây)
+        check_interval: Khoảng thời gian giữa các lần check (giây)
+
+    Returns:
+        Verification code (6 số) hoặc None nếu timeout
+    """
+    print(f"\n⏳ Đang đợi GitLab verification code (tối đa {max_wait}s)...")
+    start_time = time.time()
+
+    while time.time() - start_time < max_wait:
+        # Gọi API
+        data = get_emails_from_api(email, refresh_token, client_id)
+
+        if data and data.get("messages"):
+            # Tìm code
+            code = extract_gitlab_verification_code(data["messages"])
+            if code:
+                return code
+
+        # Đợi trước khi check lại
+        elapsed = int(time.time() - start_time)
+        remaining = max_wait - elapsed
+        print(f"  ⏱️  Chưa thấy code GitLab, đợi {check_interval}s... ({remaining}s còn lại)", end='\r')
+        time.sleep(check_interval)
+
+    print(f"\n⚠ Timeout sau {max_wait}s, không nhận được code GitLab")
+    return None
+
+
 def wait_for_bitbucket_code(email: str, refresh_token: str, client_id: str,
                             max_wait: int = 120, check_interval: int = 5,
                             resend_callback: Optional[Callable[[], bool]] = None,
