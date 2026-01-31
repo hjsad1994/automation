@@ -1064,12 +1064,13 @@ def check_webhook_status():
         return None
 
 
-def post_new_api_key(api_key):
+def post_new_api_key(api_key, replace_key_id=None):
     """
     POST API key mới lên webhook
     
     Args:
         api_key: Full API key string
+        replace_key_id: Optional - ID của key cần thay thế (từ GET /status)
         
     Returns:
         True nếu thành công, False nếu thất bại
@@ -1081,6 +1082,8 @@ def post_new_api_key(api_key):
             "Content-Type": "application/json"
         }
         payload = {"apiKey": api_key}
+        if replace_key_id:
+            payload["replaceKeyId"] = replace_key_id
         
         print(f"  📤 Đang POST API key mới lên webhook...")
         response = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -1292,11 +1295,12 @@ def webhook_monitor_loop(driver):
                 
                 for stale_key_info in stale_keys:
                     stale_api_key = stale_key_info.get("apiKey", "")
+                    stale_key_id = stale_key_info.get("id", "")
                     
                     if not stale_api_key:
                         continue
                     
-                    print(f"    Stale key: {stale_api_key[:20]}...")
+                    print(f"    Stale key: {stale_api_key[:20]}... (ID: {stale_key_id})")
                     
                     # Lấy API key hiển thị trên trang (KHÔNG navigate, chỉ check trang hiện tại)
                     displayed_key = get_displayed_api_key(driver)
@@ -1335,8 +1339,8 @@ def webhook_monitor_loop(driver):
                                     click_refresh_button(driver)
                             
                             if new_key and new_key != stale_api_key:
-                                # POST key mới lên webhook
-                                if post_new_api_key(new_key):
+                                # POST key mới lên webhook với replaceKeyId
+                                if post_new_api_key(new_key, replace_key_id=stale_key_id):
                                     last_refresh_key = new_key
                                     print(f"    🎉 Hoàn tất refresh API key!")
                                 else:
