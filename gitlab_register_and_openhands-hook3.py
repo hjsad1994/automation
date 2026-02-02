@@ -76,6 +76,9 @@ except ImportError:
 _ixbrowser_profile_id_str = os.getenv("IXBROWSER_PROFILE_ID_3", "3")
 IXBROWSER_PROFILE_ID = int(_ixbrowser_profile_id_str) if _ixbrowser_profile_id_str.isdigit() else 3
 
+# Name for webhook payload
+WEBHOOK_NAME = os.getenv("NAME_3", "tai-p3")
+
 # ixBrowser API
 IXBROWSER_API_HOST = "127.0.0.1"
 IXBROWSER_API_PORT = 53200
@@ -1064,13 +1067,14 @@ def check_webhook_status():
         return None
 
 
-def post_new_api_key(api_key, replace_key_id=None):
+def post_new_api_key(api_key, replace_key_id=None, name=None):
     """
     POST API key mới lên webhook
     
     Args:
         api_key: Full API key string
         replace_key_id: Optional - ID của key cần thay thế (từ GET /status)
+        name: Optional - Tên/email để identify key này
         
     Returns:
         True nếu thành công, False nếu thất bại
@@ -1084,6 +1088,8 @@ def post_new_api_key(api_key, replace_key_id=None):
         payload = {"apiKey": api_key}
         if replace_key_id:
             payload["replaceKeyId"] = replace_key_id
+        if name:
+            payload["name"] = name
         
         print(f"  📤 Đang POST API key mới lên webhook...")
         response = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -1340,7 +1346,7 @@ def webhook_monitor_loop(driver):
                             
                             if new_key and new_key != stale_api_key:
                                 # POST key mới lên webhook với replaceKeyId
-                                if post_new_api_key(new_key, replace_key_id=stale_key_id):
+                                if post_new_api_key(new_key, replace_key_id=stale_key_id, name=WEBHOOK_NAME):
                                     last_refresh_key = new_key
                                     print(f"    🎉 Hoàn tất refresh API key!")
                                 else:
