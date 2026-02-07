@@ -417,6 +417,9 @@ def register_gitlab(driver, email, password):
         last_url = ""
         current_url = ""
         
+        verification_challenge_retry_count = 0
+        max_verification_retries = 10  # Tối đa 10 lần retry
+        
         while time.time() - start_time < max_wait_cloudflare:
             try:
                 current_url = driver.current_url
@@ -427,48 +430,98 @@ def register_gitlab(driver, email, password):
                     print(f"  [{elapsed}s] URL: {current_url}")
                     last_url = current_url
                 
-                # Nếu đã vào trang verification hoặc welcome → xong
-                if "identity_verification" in current_url or "welcome" in current_url:
-                    print("  ✓ Đã vào trang verification/welcome")
+                # CHECK LỖI Ở MỌI ITERATION: "error loading the user verification challenge"
+                # Lỗi này có thể xuất hiện ở bất kỳ trang nào sau khi click Continue
+                try:
+                    error_selectors = [
+                        ".gl-alert-body",
+                        "[data-testid='alert-danger'] .gl-alert-body",
+                        ".flash-alert.gl-alert-danger .gl-alert-body",
+                    ]
                     
-                    # CHECK: Nếu có lỗi "error loading the user verification challenge"
-                    try:
-                        error_alert = driver.find_elements(By.CSS_SELECTOR, ".gl-alert-body")
-                        for alert in error_alert:
-                            if "error loading" in alert.text.lower() and "verification challenge" in alert.text.lower():
-                                print("  ⚠ Lỗi: 'error loading the user verification challenge'")
-                                print("  → Reload trang và nhập lại password...")
-                                
-                                # Reload trang
+                    error_found = False
+                    for selector in error_selectors:
+                        try:
+                            error_alerts = driver.find_elements(By.CSS_SELECTOR, selector)
+                            for alert in error_alerts:
+                                alert_text = alert.text.lower()
+                                if "error loading" in alert_text and "verification challenge" in alert_text:
+                                    error_found = True
+                                    break
+                        except:
+                            continue
+                        if error_found:
+                            break
+                    
+                    if error_found:
+                        verification_challenge_retry_count += 1
+                        print(f"  ⚠ Lỗi: 'error loading the user verification challenge' (lần {verification_challenge_retry_count}/{max_verification_retries})")
+                        
+                        if verification_challenge_retry_count > max_verification_retries:
+                            print("  ✗ Đã retry quá nhiều lần, bỏ qua...")
+                            break
+                        
+                        # Dismiss error alert nếu có
+                        try:
+                            dismiss_btn = driver.find_element(By.CSS_SELECTOR, ".gl-dismiss-btn, button[aria-label='Dismiss'], .js-close")
+                            dismiss_btn.click()
+                            time.sleep(0.5)
+                            print("  ✓ Đã dismiss error alert")
+                        except:
+                            pass
+                        
+                        # Nhập lại password (KHÔNG refresh trang)
+                        try:
+                            password_field = WebDriverWait(driver, 10).until(
+                                EC.presence_of_element_located((By.ID, "new_user_password"))
+                            )
+                            password_field.clear()
+                            password_field.send_keys("Aa@123456X")  # Hardcoded password
+                            print("  ✓ Đã nhập lại password")
+                            
+                            # Đợi 5 giây như yêu cầu
+                            print("  → Đợi 5s trước khi click Continue...")
+                            time.sleep(5)
+                            
+                            # Click Continue
+                            continue_btn = driver.find_element(By.CSS_SELECTOR, "[data-testid='new-user-register-button']")
+                            driver.execute_script("arguments[0].click();", continue_btn)
+                            print("  ✓ Đã click Continue")
+                            
+                            # Reset timer để tiếp tục loop
+                            start_time = time.time()
+                            last_url = ""
+                            continue
+                        except Exception as e:
+                            print(f"  ⚠ Không thể retry: {str(e)[:50]}")
+                            # Thử refresh nếu không tìm thấy password field
+                            try:
                                 driver.refresh()
                                 time.sleep(3)
-                                
-                                # Nhập lại password
-                                try:
-                                    password_field = WebDriverWait(driver, 10).until(
-                                        EC.presence_of_element_located((By.ID, "new_user_password"))
-                                    )
-                                    password_field.clear()
-                                    password_field.send_keys("Aa@123456X")  # Hardcoded password
-                                    print("  ✓ Đã nhập lại password")
-                                    time.sleep(1)
-                                    
-                                    # Click Continue
-                                    continue_btn = driver.find_element(By.CSS_SELECTOR, "[data-testid='new-user-register-button']")
-                                    continue_btn.click()
-                                    print("  ✓ Đã click Continue")
-                                    time.sleep(3)
-                                    
-                                    # Reset để tiếp tục loop
-                                    start_time = time.time()
-                                    last_url = ""
-                                    continue
-                                except Exception as e:
-                                    print(f"  ⚠ Không thể nhập lại password: {str(e)[:50]}")
+                                start_time = time.time()
+                                last_url = ""
+                                continue
+                            except:
+                                pass
+                except:
+                    pass
+                
+                # Nếu đã vào trang verification hoặc welcome VÀ không có lỗi → xong
+                if "identity_verification" in current_url or "welcome" in current_url:
+                    # Double-check không còn lỗi
+                    try:
+                        error_alerts = driver.find_elements(By.CSS_SELECTOR, ".gl-alert-body")
+                        has_error = False
+                        for alert in error_alerts:
+                            if "error loading" in alert.text.lower():
+                                has_error = True
+                                break
+                        if not has_error:
+                            print("  ✓ Đã vào trang verification/welcome thành công!")
+                            break
                     except:
-                        pass
-                    
-                    break
+                        print("  ✓ Đã vào trang verification/welcome")
+                        break
                 
                 # Nếu bị redirect về /sign_in → fail (đã warmup rồi mà vẫn bị)
                 if "/sign_in" in current_url:
@@ -836,6 +889,44 @@ def is_on_auth_page(driver):
         return False
 
 
+def is_on_email_already_verified_page(driver):
+    """
+    Check xem có đang ở trang 'Your email address has been verified already.' không
+    
+    Trang này xuất hiện khi email đã verify trước đó và cần login lại với GitLab
+    HTML: <div class="pf-v5-c-login__main-body">
+            <div id="kc-info-message">
+              <p class="instruction">Your email address has been verified already.</p>
+            </div>
+          </div>
+    """
+    try:
+        # Check page content
+        page_source = driver.page_source
+        if "Your email address has been verified already" in page_source:
+            return True
+        
+        # Check bằng selector cụ thể
+        try:
+            msg_element = driver.find_element(By.CSS_SELECTOR, "#kc-info-message .instruction")
+            if msg_element and "verified already" in msg_element.text.lower():
+                return True
+        except:
+            pass
+        
+        # Check thêm bằng class pf-v5-c-login__main-body
+        try:
+            login_body = driver.find_element(By.CSS_SELECTOR, ".pf-v5-c-login__main-body")
+            if login_body and "verified already" in login_body.text.lower():
+                return True
+        except:
+            pass
+        
+        return False
+    except:
+        return False
+
+
 def wait_for_page_transition(driver, timeout=10):
     """Đợi trang chuyển đổi (URL thay đổi hoặc content thay đổi)"""
     try:
@@ -1191,6 +1282,7 @@ def login_openhands_gitlab(driver, email, refresh_token, client_id):
         reached_verification = False
         reached_tos = False
         last_url = ""
+        gitlab_click_count = 0  # Đếm số lần click GitLab button liên tiếp
         
         while attempt < max_attempts:
             attempt += 1
@@ -1244,10 +1336,38 @@ def login_openhands_gitlab(driver, email, refresh_token, client_id):
             
             # === Nếu đang ở trang login OpenHands → click GitLab button ===
             if "/login" in current_url and "app.all-hands.dev" in current_url:
-                print("  → Đang ở trang login, click GitLab button...")
+                gitlab_click_count += 1
+                
+                # Nếu đã click 2 lần mà vẫn ở trang login → reload trang
+                if gitlab_click_count > 2:
+                    print("  ⚠ Đã click 2 lần không thành công, reload trang...")
+                    driver.refresh()
+                    time.sleep(3)
+                    gitlab_click_count = 0
+                    continue
+                
+                print(f"  → Đang ở trang login, click GitLab button (lần {gitlab_click_count})...")
                 if click_gitlab_login_button(driver, wait):
                     print("  ✓ Đã click GitLab button")
-                    time.sleep(NAV_DELAY)
+                    # Đợi lâu hơn để đảm bảo redirect hoàn tất
+                    print("  → Đợi redirect (tối đa 10s)...")
+                    redirect_start = time.time()
+                    while time.time() - redirect_start < 10:
+                        time.sleep(0.5)
+                        try:
+                            new_url = driver.current_url
+                            # Nếu URL đã thay đổi → redirect thành công
+                            if "/login" not in new_url or "app.all-hands.dev" not in new_url:
+                                print(f"  ✓ Redirect thành công: {new_url[:60]}...")
+                                gitlab_click_count = 0  # Reset counter
+                                break
+                            # Nếu đã vào trang email verification → break ngay
+                            if is_on_email_verification_page(driver):
+                                print("  ✓ Đã vào trang email verification!")
+                                gitlab_click_count = 0  # Reset counter
+                                break
+                        except:
+                            pass
                 continue
             
             time.sleep(0.5)
@@ -1268,6 +1388,7 @@ def login_openhands_gitlab(driver, email, refresh_token, client_id):
             max_attempts_2 = 20
             attempt_2 = 0
             last_url_2 = ""
+            gitlab_click_count_3b = 0  # Đếm số lần click GitLab button liên tiếp
             
             while attempt_2 < max_attempts_2:
                 attempt_2 += 1
@@ -1307,10 +1428,33 @@ def login_openhands_gitlab(driver, email, refresh_token, client_id):
                 
                 # Check login page → click GitLab
                 if "/login" in current_url and "app.all-hands.dev" in current_url:
-                    print("  → Click GitLab button...")
+                    gitlab_click_count_3b += 1
+                    
+                    # Nếu đã click 2 lần mà vẫn ở trang login → reload trang
+                    if gitlab_click_count_3b > 2:
+                        print("  ⚠ Đã click 2 lần không thành công, reload trang...")
+                        driver.refresh()
+                        time.sleep(3)
+                        gitlab_click_count_3b = 0
+                        continue
+                    
+                    print(f"  → Click GitLab button (lần {gitlab_click_count_3b})...")
                     if click_gitlab_login_button(driver, wait):
                         print("  ✓ Đã click GitLab button")
-                        time.sleep(NAV_DELAY)
+                        # Đợi lâu hơn để đảm bảo redirect hoàn tất
+                        print("  → Đợi redirect (tối đa 10s)...")
+                        redirect_start = time.time()
+                        while time.time() - redirect_start < 10:
+                            time.sleep(0.5)
+                            try:
+                                new_url = driver.current_url
+                                # Nếu URL đã thay đổi → redirect thành công
+                                if "/login" not in new_url or "app.all-hands.dev" not in new_url:
+                                    print(f"  ✓ Redirect thành công: {new_url[:60]}...")
+                                    gitlab_click_count_3b = 0  # Reset counter
+                                    break
+                            except:
+                                pass
                     continue
                 
                 time.sleep(0.5)
@@ -1347,6 +1491,8 @@ def login_openhands_gitlab(driver, email, refresh_token, client_id):
         # Retry lấy API key cho đến khi thành công
         max_retries = 10
         api_key = None
+        relogin_count = 0
+        max_relogin = 3  # Tối đa 3 lần re-login
         
         for retry in range(max_retries):
             print(f"\n  [Retry {retry + 1}/{max_retries}] Đang lấy API key...")
@@ -1356,6 +1502,121 @@ def login_openhands_gitlab(driver, email, refresh_token, client_id):
                 print(f"\n  ✅ Lấy được API key: {api_key[:25]}...")
                 save_api_key(email, api_key)
                 return True
+            
+            # CHECK: Nếu phát hiện trang "email already verified" → quay lại login
+            if api_key == "EMAIL_ALREADY_VERIFIED":
+                relogin_count += 1
+                print(f"\n  🔄 [Re-login {relogin_count}/{max_relogin}] Quay lại /login để login GitLab lại...")
+                
+                if relogin_count > max_relogin:
+                    print(f"  ✗ Đã re-login quá {max_relogin} lần, bỏ qua...")
+                    return False
+                
+                # Navigate về /login
+                driver.get(OPENHANDS_LOGIN_URL)
+                time.sleep(NAV_DELAY)
+                
+                # Click GitLab button và xử lý OAuth flow
+                re_login_success = False
+                re_login_attempts = 0
+                max_re_login_attempts = 10
+                
+                while re_login_attempts < max_re_login_attempts:
+                    re_login_attempts += 1
+                    
+                    try:
+                        current_url = driver.current_url
+                    except:
+                        time.sleep(0.5)
+                        continue
+                    
+                    print(f"    [{re_login_attempts}/{max_re_login_attempts}] URL: {current_url[:60]}...")
+                    
+                    # Check nếu đã vào trang API keys hoặc dashboard
+                    if "/settings/api-keys" in current_url or "/conversation" in current_url:
+                        print("    ✓ Đã login lại thành công!")
+                        re_login_success = True
+                        break
+                    
+                    # Check GitLab OAuth page
+                    if "gitlab.com/oauth" in current_url or "gitlab.com/-/profile" in current_url:
+                        print("    → GitLab OAuth, click Authorize...")
+                        handle_gitlab_oauth_authorize(driver)
+                        time.sleep(NAV_DELAY)
+                        continue
+                    
+                    # Check accept-tos
+                    if is_on_accept_tos_page(driver):
+                        print("    ✓ Đang ở trang Accept TOS, xử lý...")
+                        handle_accept_tos_page(driver)
+                        time.sleep(NAV_DELAY)
+                        continue
+                    
+                    # Check auth page → đợi
+                    if is_on_auth_page(driver):
+                        time.sleep(0.5)
+                        continue
+                    
+                    # Check login page → click GitLab
+                    if "/login" in current_url and "app.all-hands.dev" in current_url:
+                        print("    → Click GitLab button...")
+                        if click_gitlab_login_button(driver, wait):
+                            print("    ✓ Đã click GitLab button, đợi redirect...")
+                            time.sleep(3)
+                        continue
+                    
+                    time.sleep(0.5)
+                
+                if re_login_success:
+                    # Navigate lại đến API keys page
+                    print("  → Navigate đến API keys page sau khi re-login...")
+                    driver.get(OPENHANDS_API_KEYS_URL)
+                    time.sleep(NAV_DELAY)
+                    continue  # Tiếp tục vòng retry lấy API key
+                else:
+                    print("  ✗ Re-login thất bại")
+                    continue
+            
+            # CHECK: Nếu cần verify email → xử lý resend flow
+            if api_key == "NEED_EMAIL_VERIFICATION":
+                relogin_count += 1
+                print(f"\n  📧 [Resend {relogin_count}/{max_relogin}] Cần verify email, xử lý resend flow...")
+                
+                if relogin_count > max_relogin:
+                    print(f"  ✗ Đã resend quá {max_relogin} lần, bỏ qua...")
+                    return False
+                
+                # Xử lý email verification flow
+                verification_success = handle_email_verification_flow(driver, email, refresh_token, client_id)
+                
+                if verification_success:
+                    print("  ✓ Email verification hoàn tất, quay lại login...")
+                    # Quay lại login và click GitLab
+                    driver.get(OPENHANDS_LOGIN_URL)
+                    time.sleep(NAV_DELAY)
+                    
+                    # Click GitLab button
+                    for _ in range(5):
+                        current_url = driver.current_url
+                        if "/login" in current_url and "app.all-hands.dev" in current_url:
+                            if click_gitlab_login_button(driver, wait):
+                                time.sleep(3)
+                                break
+                        elif "gitlab.com/oauth" in current_url:
+                            handle_gitlab_oauth_authorize(driver)
+                            time.sleep(NAV_DELAY)
+                        elif is_on_accept_tos_page(driver):
+                            handle_accept_tos_page(driver)
+                            time.sleep(NAV_DELAY)
+                        time.sleep(1)
+                    
+                    # Navigate đến API keys
+                    driver.get(OPENHANDS_API_KEYS_URL)
+                    time.sleep(NAV_DELAY)
+                    continue
+                else:
+                    print("  ✗ Email verification thất bại")
+                    continue
             
             print(f"  ⚠ Chưa lấy được API key, đợi 3s và thử lại...")
             time.sleep(3)
@@ -1397,7 +1658,15 @@ def login_openhands_gitlab(driver, email, refresh_token, client_id):
 
 
 def get_api_key(driver):
-    """Lấy API key từ OpenHands bằng cách đọc trực tiếp từ span"""
+    """
+    Lấy API key từ OpenHands bằng cách đọc trực tiếp từ span
+    
+    Returns:
+        - API key string nếu tìm thấy
+        - "EMAIL_ALREADY_VERIFIED" nếu phát hiện trang "email already verified"
+        - "NEED_EMAIL_VERIFICATION" nếu cần verify email (resend)
+        - None nếu không tìm thấy
+    """
     try:
         print(f"\n[STEP 5: Get API Key]")
         
@@ -1410,7 +1679,48 @@ def get_api_key(driver):
         WebDriverWait(driver, WAIT_TIMEOUT).until(
             lambda d: d.execute_script("return document.readyState") == "complete"
         )
-        print(f"✓ Trang API keys: {driver.current_url}")
+        
+        # Đợi thêm 1s để đảm bảo redirect hoàn tất
+        time.sleep(1)
+        
+        # Lấy URL hiện tại SAU KHI page load xong
+        current_url = driver.current_url
+        print(f"✓ Trang hiện tại: {current_url}")
+        
+        # CHECK 1: Nếu bị redirect về auth page → check các trường hợp
+        if "auth.app.all-hands.dev" in current_url:
+            print("  ⚠ Đang ở trang auth (bị redirect)")
+            
+            # Check "email already verified"
+            if is_on_email_already_verified_page(driver):
+                print("  ⚠ Phát hiện: 'Your email address has been verified already.'")
+                print("  → Cần quay lại /login để login GitLab lại")
+                return "EMAIL_ALREADY_VERIFIED"
+            
+            # Check "Please check your email to verify"
+            if is_on_email_verification_page(driver):
+                print("  ⚠ Phát hiện: 'Please check your email to verify your account'")
+                print("  → Cần resend verification email")
+                return "NEED_EMAIL_VERIFICATION"
+            
+            print("  → Auth page khác, có thể cần login lại")
+            return "EMAIL_ALREADY_VERIFIED"  # Treat as need re-login
+        
+        # CHECK 2: Nếu URL là /login → chưa login
+        if "/login" in current_url and "app.all-hands.dev" in current_url:
+            print("  ⚠ Đang ở trang login (chưa đăng nhập)")
+            return "EMAIL_ALREADY_VERIFIED"  # Treat as need re-login
+        
+        # CHECK 3: Nếu đang ở trang api-keys, kiểm tra content
+        if "/settings/api-keys" in current_url:
+            # Double check: có thể page content vẫn là "verified already" 
+            if is_on_email_already_verified_page(driver):
+                print("  ⚠ Phát hiện: 'Your email address has been verified already.'")
+                return "EMAIL_ALREADY_VERIFIED"
+            
+            if is_on_email_verification_page(driver):
+                print("  ⚠ Phát hiện: 'Please check your email to verify'")
+                return "NEED_EMAIL_VERIFICATION"
         
         # Đợi trang render
         time.sleep(NAV_DELAY)
